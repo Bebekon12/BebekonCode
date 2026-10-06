@@ -1,0 +1,17 @@
+/node_modules/
+/dist/
+/target/
+/src-tauri/gen/
+/test-results/
+/playwright-report/
+*.db
+*.db-shm
+*.db-wal
+.env*
+*.key
+*.pem
+.DS_Store
+.release-notes.md
+/src-tauri/icons/*
+!/src-tauri/icons/icon.ico
+!/src-tauri/icons/icon.png

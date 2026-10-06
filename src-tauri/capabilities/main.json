@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Local desktop UI. No shell, filesystem or arbitrary network access.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}
