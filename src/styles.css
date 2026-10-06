@@ -2371,3 +2371,19 @@ dd {
   color: var(--accent);
   font-size: inherit;
 }
+
+.update-progress {
+  display: grid;
+  gap: 9px;
+  margin: 16px 0;
+}
+.update-footnote {
+  margin-top: 20px;
+  line-height: 1.7;
+}
+.update-footnote svg {
+  vertical-align: middle;
+}
+.update-panel .release-result > .primary-button {
+  margin-top: 12px;
+}

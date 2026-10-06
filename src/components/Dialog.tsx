@@ -5,11 +5,13 @@ export function Dialog({
   close,
   children,
   wide = false,
+  closeDisabled = false,
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
   wide?: boolean;
+  closeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Unique per dialog: stacked dialogs must not share a label.
@@ -65,7 +67,12 @@ export function Dialog({
       >
         <div className="dialog-heading">
           <h2 id={titleId}>{title}</h2>
-          <button className="icon-button" aria-label="Закрыть окно" onClick={close}>
+          <button
+            className="icon-button"
+            aria-label="Закрыть окно"
+            disabled={closeDisabled}
+            onClick={close}
+          >
             <X size={18} />
           </button>
         </div>

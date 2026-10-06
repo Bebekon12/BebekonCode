@@ -31,17 +31,44 @@ jobs:
           "body<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1, resolved commit
+      - name: Preserve an already published release
+        id: published
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $metadata = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0 -and !($metadata | ConvertFrom-Json).isDraft) {
+            "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          exit 0
+      - if: steps.published.outputs.ready != 'true'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1, resolved commit
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: BebekonCode ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
-          uploadUpdaterJson: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+      - name: Audit actual signed installer before publication
+        if: steps.published.outputs.ready != 'true'
+        shell: pwsh
+        run: |
+          node scripts/updater-manifest.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Local updater manifest failed' }
+          npm run test:updater
+          if ($LASTEXITCODE -ne 0) { throw 'Updater signature audit failed' }
       - name: Upload standalone Windows executable
+        if: steps.published.outputs.ready != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,3 +78,23 @@ jobs:
           $standalone = "target/release/BebekonCode_${releaseVersion}_x64.exe"
           Copy-Item -LiteralPath 'target/release/bebekoncode-desktop.exe' -Destination $standalone
           gh release upload $env:RELEASE_TAG $standalone --clobber
+      - name: Verify updater assets and publish complete release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $releaseVersion = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $folder = Join-Path $env:RUNNER_TEMP 'signed-update'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          gh release download $env:RELEASE_TAG --pattern 'latest.json' --dir $folder
+          if ($LASTEXITCODE -ne 0) { throw 'Updater manifest missing' }
+          $manifest = Get-Content -LiteralPath (Join-Path $folder 'latest.json') -Raw | ConvertFrom-Json
+          if ($manifest.version.TrimStart('v') -ne $releaseVersion) { throw 'Manifest version mismatch' }
+          $platform = $manifest.platforms.'windows-x86_64'
+          if (!$platform) { $platform = $manifest.platforms.'windows-x86_64-nsis' }
+          if (!$platform.signature -or !$platform.url.EndsWith('-setup.exe')) { throw 'Signed NSIS update missing' }
+          $expectedPrefix = "https://github.com/Bebekon12/BebekonCode/releases/download/$env:RELEASE_TAG/"
+          if (!$platform.url.StartsWith($expectedPrefix)) { throw 'Unexpected update URL' }
+          gh release edit $env:RELEASE_TAG --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

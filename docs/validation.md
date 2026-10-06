@@ -1,5 +1,29 @@
 # Validation record
 
+## 0.3.2 — 2026-10-06
+
+Passed locally on Windows x64:
+
+- Whole-workspace Cargo fmt/check/test/clippy, locked dependencies and denied warnings.
+  36 Rust tests passed; the existing live-Codex test remains opt-in and ignored.
+- Strict TypeScript, 22 unit tests, production build, formatting and version checks.
+- Seven Edge UI tests, including confirmation/cancellation, progress, protected settings
+  navigation during download, surfaced errors and recovery, and no installation for current version.
+- Signed NSIS EXE and Russian MSI build. Original dependency versions/checksums preserved;
+  updater/process plugins add 27 packages.
+- Official native updater verified the actual 6,459,172-byte NSIS installer against the embedded
+  key. It rejected a one-byte alteration and a version differing from signed metadata.
+  The test-only example never calls install and does not use the user's data directory.
+- Packaged native WebView2/IPC file CRUD, external-save conflicts, Unicode paths, protected
+  Git metadata, traversal and unsaved-change guards passed in an isolated profile alongside
+  the user's running app.
+- GitHub Actions signing secrets were configured through GitHub's encrypted secrets API.
+
+UI tests use a controlled preview fixture for updater interactions; signature checks use the
+real official plugin and generated installer. A complete installed-version upgrade and
+installer-triggered restart have not been run against the user's installed copy. No live Codex
+account/inference test, Authenticode provisioning or full installer/uninstall QA is claimed.
+
 ## 0.2.0 — 2026-10-06
 
 Passed locally on Windows x64, Rust 1.99.0 MSVC, Node 24.12.0:

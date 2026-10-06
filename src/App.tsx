@@ -58,6 +58,7 @@ export function App() {
   };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [release, setRelease] = useState<ReleaseCheck | null>(null);
   const currentId = useRef(sessionId);
   currentId.current = sessionId;
@@ -304,7 +305,7 @@ export function App() {
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (dialog === 'files') return; // File editor owns its unsaved-change navigation.
+      if (dialog === 'files' || updateBusy) return; // File editor owns its unsaved-change navigation.
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setDialog((current) => (current === 'commands' ? null : 'commands'));
@@ -316,7 +317,7 @@ export function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [dialog]);
+  }, [dialog, updateBusy]);
 
   const providerName = (id?: string) =>
     data?.providers.find((provider) => provider.id === id)?.name ?? id ?? '';
@@ -401,7 +402,10 @@ export function App() {
           </div>
         )}
         {release?.available && (
-          <button className="release-banner" onClick={() => setDialog('settings')}>
+          <button
+            className="release-banner"
+            onClick={() => showSettings('О программе и обновления')}
+          >
             Доступна версия {release.latest_version} · посмотреть изменения{' '}
             <ChevronRight size={14} />
           </button>
@@ -641,6 +645,8 @@ export function App() {
           accounts={data.accounts}
           accountState={accountState}
           onAccountsChanged={reloadAccounts}
+          setUpdateBusy={setUpdateBusy}
+          runningSessions={data.sessions.filter((item) => item.status === 'running').length}
           release={release}
           updateRelease={setRelease}
           close={() => setDialog(null)}

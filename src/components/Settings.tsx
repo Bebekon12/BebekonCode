@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { ArrowUpRight, Check, Download, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { Dialog } from './Dialog';
+import { isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   AccountProfile,
   ClientTransport,
@@ -10,9 +12,10 @@ import type {
 } from '../contracts';
 import type { AccountState } from '../accounts';
 import { ProviderAccounts } from './Accounts';
+import { UpdatePanel } from './UpdatePanel';
 import product from '../../product.json';
 import pkg from '../../package.json';
-import { errorText, formatDate } from '../locale';
+import { errorText } from '../locale';
 export function Settings({
   client,
   initialTab,
@@ -21,9 +24,10 @@ export function Settings({
   accounts,
   accountState,
   onAccountsChanged,
+  runningSessions,
+  setUpdateBusy,
   updateSettings,
   updateProviders,
-  release,
   updateRelease,
   close,
 }: {
@@ -34,6 +38,8 @@ export function Settings({
   accounts: AccountProfile[];
   accountState: AccountState;
   onAccountsChanged: () => void;
+  runningSessions: number;
+  setUpdateBusy: (value: boolean) => void;
   updateSettings: (value: AppSettings) => void;
   updateProviders: (value: ProviderInfo[]) => void;
   release: ReleaseCheck | null;
@@ -42,6 +48,26 @@ export function Settings({
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Основные');
   const [busy, setBusy] = useState(false);
+  const [installing, setInstallingState] = useState(false);
+  const setInstalling = (value: boolean) => {
+    setInstallingState(value);
+    setUpdateBusy(value);
+  };
+  useEffect(() => {
+    if (!installing || !isTauri()) return;
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested((event) => event.preventDefault())
+      .then((remove) => {
+        if (alive) unlisten = remove;
+        else remove();
+      });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [installing]);
   const [error, setError] = useState('');
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -55,7 +81,14 @@ export function Settings({
     }
   };
   return (
-    <Dialog title="Настройки" close={close} wide>
+    <Dialog
+      title="Настройки"
+      close={() => {
+        if (!installing) close();
+      }}
+      wide
+      closeDisabled={installing}
+    >
       <div className="settings-layout">
         <nav aria-label="Разделы настроек">
           {['Основные', 'Провайдеры', 'Разрешения', 'Возможности', 'О программе и обновления'].map(
@@ -63,6 +96,7 @@ export function Settings({
               <button
                 key={category}
                 className={tab === category ? 'selected' : ''}
+                disabled={installing}
                 onClick={() => setTab(category)}
               >
                 {category}
@@ -85,7 +119,9 @@ export function Settings({
               <div className="setting-row">
                 <div>
                   <strong>Проверять обновления при запуске</strong>
-                  <p>Один запрос к GitHub при запуске. Установка обновлений вручную.</p>
+                  <p>
+                    Проверка новых версий при запуске. Установка внутри приложения по подтверждению.
+                  </p>
                 </div>
                 <input
                   aria-label="Проверять обновления при запуске"
@@ -230,52 +266,12 @@ export function Settings({
                 Ранняя версия. Подключён официальный Codex app-server; адаптер Claude Code —
                 следующий этап.
               </div>
-              <div className="update-actions">
-                <button
-                  className="primary-button"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => updateRelease(await client.checkReleases(true)))
-                  }
-                >
-                  <RefreshCw size={15} className={busy ? 'spin' : ''} />{' '}
-                  {busy ? 'Проверка…' : 'Проверить обновления'}
-                </button>
-                <button
-                  className="secondary-button"
-                  onClick={() => void run(() => client.openReleases())}
-                >
-                  История версий <ArrowUpRight size={14} />
-                </button>
-              </div>
-              {release && (
-                <div className="release-result">
-                  <div className="context-title">
-                    {release.available ? <Download size={17} /> : <Check size={17} />}{' '}
-                    {release.available
-                      ? `Доступна версия ${release.latest_version}`
-                      : release.latest_version
-                        ? `Установлена актуальная версия · ${release.latest_version}`
-                        : 'Стабильных выпусков пока нет'}
-                  </div>
-                  <p className="small muted">Проверено: {formatDate(release.checked_at)}</p>
-                  <pre className="release-notes">
-                    {release.notes || 'Описание изменений отсутствует.'}
-                  </pre>
-                  {release.available && (
-                    <button
-                      className="secondary-button"
-                      onClick={() => void run(() => client.openReleases())}
-                    >
-                      Открыть выпуск и скачать <ArrowUpRight size={14} />
-                    </button>
-                  )}
-                </div>
-              )}
-              <p className="small muted">
-                Проверка использует GitHub Releases API. Приложение не скачивает и не запускает
-                установщик. Автоматические обновления с проверкой подписи появятся позже.
-              </p>
+              <UpdatePanel
+                client={client}
+                setInstalling={setInstalling}
+                runningSessions={runningSessions}
+                updateRelease={updateRelease}
+              />
             </>
           )}
           {error && (

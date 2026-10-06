@@ -295,6 +295,12 @@ export const preview: ClientTransport = {
     if (!pending || pending.sessionId !== sessionId) throw new Error('Запрос уже закрыт');
     pending.resolve(decision);
   },
+  checkUpdate: async () => {
+    throw new Error('Подписанные обновления доступны только в приложении для Windows.');
+  },
+  installUpdate: async () => {
+    throw new Error('Обновление устанавливается только в приложении для Windows.');
+  },
   openUsage: async () => {
     window.open('https://chatgpt.com/settings/usage', '_blank', 'noopener,noreferrer');
   },

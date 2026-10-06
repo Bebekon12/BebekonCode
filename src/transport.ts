@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { checkUpdate, installUpdate } from './updates';
 import type { AccountEvent, AgentEvent, ClientTransport } from './contracts';
 
 export const desktop: ClientTransport = {
@@ -56,6 +57,8 @@ export const desktop: ClientTransport = {
   resolveApproval: (sessionId, approvalId, decision) =>
     invoke('resolve_approval', { sessionId, approvalId, decision }),
   openUsage: (provider) => invoke('open_usage', { provider }),
+  checkUpdate,
+  installUpdate,
   saveSettings: (settings) => invoke('save_settings', { settings }),
   gitStatus: (workspaceId) => invoke('git_status', { workspaceId }),
   gitDiff: (workspaceId) => invoke('git_diff', { workspaceId }),

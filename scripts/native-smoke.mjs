@@ -180,6 +180,21 @@ try {
   await page.getByRole('button', { name: 'Остановить агента', exact: true }).click();
   await page.getByText(/^Остановлено вами/).waitFor();
   await page.screenshot({ path: 'test-results/native-russian.png' });
+  if (process.argv.includes('--updates')) {
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'О программе и обновления' })
+      .click();
+    await page.getByRole('button', { name: 'Проверить обновления', exact: true }).click();
+    await page.getByText(/Установлена актуальная версия/).waitFor({ timeout: 45_000 });
+    assert.equal(
+      await page.getByRole('button', { name: 'Установить и перезапустить', exact: true }).count(),
+      0,
+    );
+    await page.screenshot({ path: 'test-results/native-update-current.png' });
+    console.log('PASS: native signed updater checked the public GitHub manifest');
+  }
   assert.deepEqual(errors, []);
   console.log(
     'PASS: native packaged WebView2, real IPC/disk CRUD, conflict handling, Unicode paths, traversal, dirty-navigation, native window close and branding',

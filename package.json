@@ -1,6 +1,6 @@
 {
   "name": "bebekoncode",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -16,11 +16,14 @@
     "tauri": "tauri",
     "check:versions": "node scripts/check-versions.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,css,json,mjs,yml,md,html}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,css,json,mjs,yml,md,html}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,css,json,mjs,yml,md,html}\"",
+    "test:updater": "node scripts/updater-audit.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.13.1",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

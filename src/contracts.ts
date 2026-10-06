@@ -134,6 +134,17 @@ export interface ReleaseCheck {
   release_url: string;
   checked_at: number;
 }
+export interface AppUpdate {
+  version: string;
+  currentVersion: string;
+  notes: string;
+  date: string | null;
+}
+export interface UpdateProgress {
+  phase: 'downloading' | 'verifying' | 'installing';
+  downloaded: number;
+  total: number | null;
+}
 export interface ClientTransport {
   listFiles(workspaceId: string, path: string): Promise<FileEntry[]>;
   readFile(workspaceId: string, path: string): Promise<string>;
@@ -162,6 +173,9 @@ export interface ClientTransport {
   subscribeAccounts(onEvent: (event: AccountEvent) => void): Promise<() => void>;
   resolveApproval(sessionId: string, approvalId: string, decision: ApprovalDecision): Promise<void>;
   openUsage(provider: string): Promise<void>;
+  /** Signed in-app update. `null` means the installed version is current. */
+  checkUpdate(): Promise<AppUpdate | null>;
+  installUpdate(version: string, onProgress: (progress: UpdateProgress) => void): Promise<void>;
   saveSettings(settings: Settings): Promise<void>;
   gitStatus(workspaceId: string): Promise<GitStatus>;
   gitDiff(workspaceId: string): Promise<string>;

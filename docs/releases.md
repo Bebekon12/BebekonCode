@@ -23,14 +23,58 @@ Published tags are immutable in normal use. Fix a release with a new version; do
 or replace an existing tag. GitHub Actions uses its scoped GITHUB_TOKEN, not a committed PAT.
 Workflow dependencies are pinned by commit SHA. Updates should refresh pins after review.
 
-The first release is explicitly early development even though it is visible on the stable
-metadata channel. There is no automatic installation. Preview/draft releases are excluded by
-the app's `/releases/latest` checker. A 404 means no public stable release is available (also
-possible for inaccessible private repos); a rate-limit/network error is visible and is not
-reported as “up to date”. Notes are displayed as text, never raw executable HTML.
+## Signed in-app updates (from 0.3.2)
 
-Before enabling automatic updates, generate a persistent Tauri signing key **outside the repo**,
-store the private key/password in protected GitHub Actions secrets, keep an offline recovery
-copy, commit only the public key, enable the official plugin and signed updater manifests,
-and test signature failures, target compatibility and upgrade recovery. Never commit keys or
-accept unsigned automatic payloads. Windows Authenticode signing requires separate provisioning.
+The official Tauri updater reads
+`https://github.com/Bebekon12/BebekonCode/releases/latest/download/latest.json`.
+NSIS `setup.exe` is the update payload (`updaterJsonPreferNsis: true`). The manifest contains
+its signature and a versioned HTTPS asset URL. Updates use Windows `passive` mode: a small
+progress window, no setup wizard. NSIS restarts the app after installation. The app downloads
+only after confirmation and never installs if signature verification fails. Active sessions
+block installation. Signed version metadata must match the manifest version; the core shuts down idle provider processes before launching the installer.
+Checks have a 30-second timeout, downloads a 120-second timeout. Retry requires a fresh check.
+
+The key was generated outside the repository in `%USERPROFILE%\.bebekoncode\signing`.
+Only the public key belongs in `tauri.conf.json`. GitHub Actions secrets
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` hold the encrypted signing
+material. Keep a secure offline backup: losing the key breaks updates for existing installations.
+Never print keys or passwords in logs. Tauri signatures are separate from Windows Authenticode.
+
+Local signed build (PowerShell, no secrets in command arguments):
+
+```powershell
+$signingFolder = Join-Path $env:USERPROFILE '.bebekoncode\signing'
+try {
+  $env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $signingFolder 'bebekoncode-updater.key'
+  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = (Get-Content -LiteralPath (Join-Path $signingFolder 'bebekoncode-updater.password') -Raw).Trim()
+  npm run package
+} finally {
+  Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+  Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+}
+```
+
+The release workflow uploads installers, `.sig` files and `latest.json` to a draft; it checks the
+manifest version, NSIS payload and canonical asset URL before publishing the complete release.
+Published tags remain immutable. Fixes use a new version. Preview/draft releases are excluded
+from `/releases/latest`. A network/signature/permission error must remain visible.
+
+Upgrading from 0.3.1 or older requires one manual installer run because those versions do not
+contain the updater. Future upgrades are initiated inside Settings. Test a complete installed
+upgrade separately before claiming installation QA; do not replace a user's running app for tests.
+
+Sources: [Tauri updater](https://v2.tauri.app/plugin/updater/),
+[pinned release action inputs](https://github.com/tauri-apps/tauri-action/blob/1deb371b0cd8bd54025b384f1cd735e725c4060f/action.yml).
+
+Local package verification after building:
+
+```powershell
+node scripts/release-notes.mjs
+node scripts/updater-manifest.mjs
+npm run test:updater
+```
+
+This runs the official native updater against a test-only loopback fixture, verifies the actual
+installer signature, rejects a modified installer and a different advertised version, and never
+installs. `updater_audit` is an example executable, not part of the shipped app. Production uses
+HTTPS only and the GitHub endpoint. Already published assets are preserved by workflow retries.

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Local desktop UI. Project-scoped Rust commands handle user file actions. No frontend shell or arbitrary network API.",
+  "description": "Local desktop UI. Project-scoped Rust commands handle user file actions. No frontend shell or arbitrary network API. Signed updates through the official updater plugin; restart after install.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,6 +10,8 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

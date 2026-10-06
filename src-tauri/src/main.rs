@@ -86,6 +86,24 @@ async fn file_operation(
 }
 
 #[tauri::command]
+async fn prepare_update(state: State<'_, AppState>) -> IpcResult<()> {
+    let snapshot = state
+        .core
+        .snapshot()
+        .await
+        .map_err(|error| error.to_string())?;
+    if snapshot
+        .sessions
+        .iter()
+        .any(|session| session.status == "running")
+    {
+        return Err("Остановите активные сессии перед установкой обновления".into());
+    }
+    state.core.shutdown().await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_project(
     workspace_id: String,
     terminal: bool,
@@ -420,6 +438,13 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Signed updates only: the updater verifies every package against the embedded key.
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .target("windows-x86_64")
+                .build(),
+        )
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             let directory = match profile {
                 Some(directory) => directory,
@@ -486,7 +511,8 @@ fn main() {
             check_releases,
             open_releases,
             file_operation,
-            open_project
+            open_project,
+            prepare_update
         ])
         .build(context);
     match app {
