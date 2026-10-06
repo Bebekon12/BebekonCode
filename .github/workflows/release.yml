@@ -40,4 +40,4 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: false
+          uploadUpdaterJson: false
