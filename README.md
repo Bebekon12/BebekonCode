@@ -1,16 +1,33 @@
-# Nexus · AI developer workspace
+# BebekonCode · AI developer workspace
 
 A local Windows desktop workspace for coding agents. Rust core, Tauri 2, React and SQLite.
-Working name: **Nexus**. Source repository: [BebekonCode](https://github.com/Bebekon12/BebekonCode).
+Source repository: [BebekonCode](https://github.com/Bebekon12/BebekonCode).
 
-**0.1.0 is the first development slice, not the complete production V1.** The local demo works:
+**0.2.0 is a development release, not the complete production V1.** The local demo works:
 add a project, create independent sessions, send messages, watch streaming, stop a turn and reopen
 saved history. Read your actual Git status/diff. OpenAI and Claude are detected but not connected;
-the demo does not inspect or edit project files. No credentials are required to try it.
+the demo does not inspect or edit project files. The separate user-operated file manager reads
+and edits real project files. No credentials are required to try it.
+
+## Install the Windows app
+
+Download `BebekonCode_0.2.0_x64-setup.exe` from [GitHub Releases](https://github.com/Bebekon12/BebekonCode/releases).
+For a standalone launch, use `BebekonCode_0.2.0_x64.exe` (WebView2 Runtime must already be installed).
+The installed app runs as `bebekoncode-desktop.exe` with a bundled UI in WebView2. End users do
+not run a browser, npm, Node or a development server. WebView2 is the Windows rendering runtime.
+
+Select a project and click **Project files** to browse local folders, create files/folders,
+edit UTF-8 text, save with Ctrl S, rename/move entries, or permanently delete a file/empty folder
+after confirmation. Explorer opens the project in Windows; PowerShell opens a visible native
+terminal with the project as its working directory. The terminal is external, not embedded.
+Files larger than 2 MiB, binary files, other encodings and nonempty-folder deletion use external
+Windows tools. Junctions, links, reserved names, traversal and `.git` internals are blocked in
+the built-in file manager. Saves check for external content changes and replace the file from
+a same-directory temporary file; unsaved edits require a discard decision before navigation.
 
 ## Requirements
 
-Windows 11 x64, WebView2 Runtime, Rust stable (MSVC), Visual Studio 2022 Build Tools with Desktop
+For development: Windows 11 x64, WebView2 Runtime, Rust stable (MSVC), Visual Studio 2022 Build Tools with Desktop
 development with C++, Windows SDK, Node.js 22+ and npm. Git is optional for the app, required to
 develop this repository. No Electron, Chromium service, Node backend or SQLite service is used.
 
@@ -52,7 +69,9 @@ npm run test:e2e
 
 For an installed Edge instead of Playwright's browser: set `$env:PLAYWRIGHT_CHANNEL = 'msedge'`.
 Browser tests cover the development UI adapter; Rust tests validate persistence and runtime.
-They are not full WebView2/installer automation or real provider end-to-end tests.
+After packaging, `npm run test:native` checks the actual executable's WebView2/IPC and file CRUD
+using an isolated temporary profile. Only that test process enables a loopback debug connection.
+These tests are not full installer automation or real provider end-to-end tests.
 
 ## Releases and updates
 
@@ -73,6 +92,8 @@ will use the official signed Tauri updater after signing is configured.
 - [Future mobile transport](docs/mobile-future.md)
 
 App state lives under `%LOCALAPPDATA%\com.bebekon.agent-workspace\workspace.db`.
+An explicit `--data-dir D:\absolute\folder` launch option selects a separate local data profile,
+including for isolated native smoke tests. The stable default identifier preserves existing data.
 SQLite stores metadata and private local transcripts; provider secrets belong only in native
 secure storage. No telemetry, remote listener, automatic account rotation or permission bypass.
 

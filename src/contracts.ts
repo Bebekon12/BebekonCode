@@ -81,6 +81,13 @@ export interface ReleaseCheck {
   checked_at: number;
 }
 export interface ClientTransport {
+  listFiles(workspaceId: string, path: string): Promise<FileEntry[]>;
+  readFile(workspaceId: string, path: string): Promise<string>;
+  saveFile(workspaceId: string, path: string, expected: string, content: string): Promise<void>;
+  createPath(workspaceId: string, path: string, directory: boolean): Promise<void>;
+  renamePath(workspaceId: string, path: string, destination: string): Promise<void>;
+  deletePath(workspaceId: string, path: string): Promise<void>;
+  openProject(workspaceId: string, terminal: boolean): Promise<void>;
   snapshot(): Promise<Snapshot>;
   chooseFolder(): Promise<string | null>;
   addWorkspace(root: string): Promise<Workspace>;
@@ -95,4 +102,12 @@ export interface ClientTransport {
   gitDiff(workspaceId: string): Promise<string>;
   checkReleases(force: boolean): Promise<ReleaseCheck>;
   openReleases(): Promise<void>;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  directory: boolean;
+  blocked: boolean;
+  size: number;
 }

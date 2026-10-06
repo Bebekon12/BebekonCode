@@ -19,3 +19,6 @@ tracing = "0.1"
 regex = "1"
 keyring = { version = "3", features = ["windows-native"] }
 which = "8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

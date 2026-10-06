@@ -2,6 +2,32 @@
 
 Every release links to a version tag and includes the same reviewed notes in GitHub Releases.
 
+## 0.2.0 — 2026-10-06
+
+### Added
+
+- Real user-operated project file browser and UTF-8 text editor in the Windows desktop app.
+- Create files/folders, save with Ctrl S, rename/move entries and confirmed permanent deletion
+  of files/empty folders. Changes are written to the local disk through Rust IPC commands.
+- Save conflict checks, same-directory staged replacement, unsaved-change decisions and bounds
+  for text/file listings. Block traversal, Windows device names, junctions and `.git` internals.
+- Open the selected project in Explorer or a visible external PowerShell terminal.
+- Optional absolute `--data-dir` launch argument for separate local profiles and native QA.
+
+### Changed
+
+- Product name is now BebekonCode. A snowman with glasses, a blue scarf and a top hat appears in
+  the desktop UI, Windows executable and NSIS/MSI installer icons. Existing app data is retained.
+
+### Known limitations
+
+- OpenAI/Claude adapters remain unavailable; the local demo is a simulation without file tools.
+- The built-in editor supports UTF-8 text up to 2 MiB. Nonempty-folder deletion, other encodings
+  and binary editing use external Windows tools. File removal is permanent, not the Recycle Bin.
+- PowerShell opens externally; embedded terminal, isolated worktrees and agent tool approvals
+  remain future work. Manual file operations are not an OS sandbox against hostile processes.
+- Releases are not code-signed. GitHub update checks work; installation is still manual.
+
 ## 0.1.1 — 2026-10-06
 
 ### Fixed

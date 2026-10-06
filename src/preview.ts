@@ -50,6 +50,27 @@ const listeners = new Set<(event: AgentEvent) => void>();
 const cancelled = new Set<string>();
 const now = () => Math.floor(Date.now() / 1000);
 export const preview: ClientTransport = {
+  listFiles: async () => {
+    throw new Error('Project files are available in the Windows desktop app.');
+  },
+  readFile: async () => {
+    throw new Error('File editor is available in the Windows desktop app.');
+  },
+  saveFile: async () => {
+    throw new Error('File editor is available in the Windows desktop app.');
+  },
+  createPath: async () => {
+    throw new Error('File creation is available in the Windows desktop app.');
+  },
+  renamePath: async () => {
+    throw new Error('File rename is available in the Windows desktop app.');
+  },
+  deletePath: async () => {
+    throw new Error('File deletion is available in the Windows desktop app.');
+  },
+  openProject: async () => {
+    throw new Error('Explorer and PowerShell are available in the Windows desktop app.');
+  },
   snapshot: async () => structuredClone(state),
   chooseFolder: async () => 'D:\\Preview\\sample-project',
   addWorkspace: async (root) => {

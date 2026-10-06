@@ -36,8 +36,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Nexus ${{ github.ref_name }}
+          releaseName: BebekonCode ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: false
+      - name: Upload standalone Windows executable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $releaseVersion = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $standalone = "target/release/BebekonCode_${releaseVersion}_x64.exe"
+          Copy-Item -LiteralPath 'target/release/bebekoncode-desktop.exe' -Destination $standalone
+          gh release upload $env:RELEASE_TAG $standalone --clobber

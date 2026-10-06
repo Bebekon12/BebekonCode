@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Local desktop UI. No shell, filesystem or arbitrary network access.",
+  "description": "Local desktop UI. Project-scoped Rust commands handle user file actions. No frontend shell or arbitrary network API.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "core:window:allow-destroy", "dialog:allow-open"]
 }

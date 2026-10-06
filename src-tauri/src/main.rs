@@ -8,8 +8,121 @@ use tauri_plugin_opener::OpenerExt;
 struct AppState {
     core: Arc<Core>,
     release: tokio::sync::Mutex<Option<ReleaseCheck>>,
+    files: tokio::sync::Mutex<()>,
 }
 type IpcResult<T> = Result<T, String>;
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum FileOperation {
+    List {
+        path: String,
+    },
+    Read {
+        path: String,
+    },
+    Save {
+        path: String,
+        expected: String,
+        content: String,
+    },
+    Create {
+        path: String,
+        directory: bool,
+    },
+    Rename {
+        path: String,
+        destination: String,
+    },
+    Delete {
+        path: String,
+    },
+}
+
+#[tauri::command]
+async fn file_operation(
+    workspace_id: String,
+    operation: FileOperation,
+    state: State<'_, AppState>,
+) -> IpcResult<serde_json::Value> {
+    let workspace = state
+        .core
+        .storage
+        .workspace(&workspace_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let _guard = state.files.lock().await;
+    tauri::async_runtime::spawn_blocking(move || -> agent_core::Result<serde_json::Value> {
+        use agent_core::files;
+        let root = Path::new(&workspace.root);
+        match operation {
+            FileOperation::List { path } => Ok(serde_json::to_value(files::list(root, &path)?)?),
+            FileOperation::Read { path } => Ok(serde_json::to_value(files::read(root, &path)?)?),
+            FileOperation::Save {
+                path,
+                expected,
+                content,
+            } => {
+                files::save(root, &path, &expected, &content)?;
+                Ok(serde_json::Value::Null)
+            }
+            FileOperation::Create { path, directory } => {
+                files::create(root, &path, directory)?;
+                Ok(serde_json::Value::Null)
+            }
+            FileOperation::Rename { path, destination } => {
+                files::rename(root, &path, &destination)?;
+                Ok(serde_json::Value::Null)
+            }
+            FileOperation::Delete { path } => {
+                files::remove(root, &path)?;
+                Ok(serde_json::Value::Null)
+            }
+        }
+    })
+    .await
+    .map_err(|_| "File operation could not finish".to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_project(
+    workspace_id: String,
+    terminal: bool,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> IpcResult<()> {
+    let workspace = state
+        .core
+        .storage
+        .workspace(&workspace_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let root = agent_core::files::resolve(Path::new(&workspace.root), "", false)
+        .map_err(|error| error.to_string())?;
+    if terminal {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // Explicit user click opens a visible console. No shell interpolation or agent execution.
+            std::process::Command::new("powershell.exe")
+                .arg("-NoExit")
+                .current_dir(root)
+                .creation_flags(0x00000010)
+                .spawn()
+                .map_err(|_| "Could not open PowerShell".to_string())?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            Err("Terminal launcher currently supports Windows".into())
+        }
+    } else {
+        app.opener()
+            .open_path(root.to_string_lossy(), None::<&str>)
+            .map_err(|_| "Could not open Explorer".to_string())
+    }
+}
 
 #[tauri::command]
 async fn snapshot(state: State<'_, AppState>) -> IpcResult<Snapshot> {
@@ -164,7 +277,20 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let directory = app.path().app_local_data_dir()?;
+            let mut directory = app.path().app_local_data_dir()?;
+            let mut arguments = std::env::args_os().skip(1);
+            while let Some(argument) = arguments.next() {
+                if argument == "--data-dir" {
+                    let path = arguments
+                        .next()
+                        .map(std::path::PathBuf::from)
+                        .ok_or("--data-dir requires an absolute folder")?;
+                    if !path.is_absolute() {
+                        return Err("--data-dir requires an absolute folder".into());
+                    }
+                    directory = path;
+                }
+            }
             std::fs::create_dir_all(&directory)?;
             let core = tauri::async_runtime::block_on(Core::open(&directory.join("workspace.db")))?;
             let mut events = core.subscribe();
@@ -185,6 +311,7 @@ fn main() {
             app.manage(AppState {
                 core,
                 release: tokio::sync::Mutex::new(None),
+                files: tokio::sync::Mutex::new(()),
             });
             Ok(())
         })
@@ -200,7 +327,9 @@ fn main() {
             git_status,
             git_diff,
             check_releases,
-            open_releases
+            open_releases,
+            file_operation,
+            open_project
         ])
         .build(tauri::generate_context!());
     match app {

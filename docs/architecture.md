@@ -1,7 +1,7 @@
 # Architecture and initial plan
 
-Status: implemented first vertical slice, version 0.1.0. This is an early development release,
-not the full production V1. The working name is Nexus; UI identity and repository live in
+Status: implemented local desktop slice and manual file manager, version 0.2.0. This is an early development release,
+not the full production V1. The product name is BebekonCode; UI identity and repository live in
 `product.json`, installer identity in `src-tauri/tauri.conf.json`. Keep the application identifier
 stable when renaming so existing local data is retained.
 
@@ -34,6 +34,8 @@ ClientTransport without changing provider logic. No server or remote transport e
 7. Settings, command palette, bounded read-only Git status and unified staged/unstaged diff.
 8. Opt-in startup/manual GitHub release checks, SemVer comparison, changelog and release link.
 9. Windows installer packaging and CI/release workflows.
+10. Manual project file browser/editor, real disk CRUD, external Explorer/PowerShell, explicit
+    deletion/discard decisions and native window-close protection for unsaved text.
 
 ## Significant library decisions
 
@@ -72,5 +74,5 @@ timeline reconnect. A second desktop instance focuses the first instead of reope
 5. Capability router with explicit bindings, audit records, context minimization and delegation caps.
 6. Signed Tauri automatic updates after a persistent signing key is provisioned outside the repo.
 
-No measured production memory/startup guarantee is claimed. Account auth, terminal, artifacts,
+No measured production memory/startup guarantee is claimed. Account auth, embedded terminal, artifacts,
 interactive approvals and worktree sessions remain unavailable in this release.

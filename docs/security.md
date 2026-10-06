@@ -5,7 +5,8 @@ The only implemented external request is an explicit or opt-in GitHub release me
 The mock agent never reads files, executes commands, contacts a provider or changes a project.
 
 Tauri capabilities grant only core UI events/window behavior and the native open-folder dialog.
-There is no frontend shell, filesystem or HTTP API. CSP restricts scripts to packaged assets,
+There is no generic frontend shell, filesystem-plugin or HTTP API. Typed project-scoped file
+commands run in Rust only for user actions; they are not available as agent tools. CSP restricts scripts to packaged assets,
 forbids frames and objects, and restricts connect-src to IPC (and loopback HMR in development).
 Prompts/provider text are rendered as escaped React text, never executable HTML. Browser preview
 requires a development build and `?preview=1`; its in-memory state is clearly labeled.
@@ -24,8 +25,19 @@ and crash dump handling need review before real authentication is shipped.
 
 Paths are canonicalized before a workspace is saved. Existing-file containment resolves symlinks
 and junctions and checks path components. This is a policy check, not an OS filesystem sandbox;
-real providers must keep their own sandbox and approval controls. New-file writes will need
-nearest-existing-parent validation and race-aware filesystem operations before tools ship.
+real providers must keep their own sandbox and approval controls. The user file manager validates
+relative components and existing parents, rejects links/reparse points, device names, traversal,
+alternate data streams and `.git` internals. Text reads and writes are capped at 2 MiB; folder
+listings at 5000 entries. Writes compare expected content and stage/sync a same-directory file
+before replacement ([MoveFileExW on Windows](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw)). IPC file operations are serialized. Deletion is
+nonrecursive and requires a displayed-path confirmation in the UI. These path/content checks
+are not atomic against a malicious external process replacing directories between checks.
+Inherited/custom ACLs and hard-link identity can change on replacement. This is a manual editor
+boundary, not permission to reuse these operations as a sandbox for an untrusted agent.
+
+Explicit user clicks can open Explorer and a visible external PowerShell console for the
+selected project. PowerShell receives a working directory and a fixed `-NoExit` argument;
+there is no interpolation of filenames into a shell command or frontend command execution API.
 
 Read-only Git calls use a directly resolved executable, no shell, clean allowlisted environment,
 null stdin/stderr, ten-second timeout and a two-MiB output limit. fsmonitor is disabled to avoid

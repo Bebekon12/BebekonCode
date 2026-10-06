@@ -183,7 +183,7 @@ export function Settings({
           {tab === 'About & updates' && (
             <>
               <div className="about-brand">
-                <img src="/mark.svg" alt="" />
+                <img src="/brand/snowman.png" alt="" />
                 <div>
                   <h3>{product.name}</h3>
                   <p>Version {pkg.version} · Windows desktop</p>

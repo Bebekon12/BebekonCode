@@ -1,6 +1,7 @@
 pub mod capabilities;
 pub mod credentials;
 pub mod error;
+pub mod files;
 pub mod git;
 pub mod model;
 pub mod permissions;

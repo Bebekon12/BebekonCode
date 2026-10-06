@@ -1,6 +1,6 @@
 {
-  "name": "bebekon-agent-workspace",
-  "version": "0.1.1",
+  "name": "bebekoncode",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:native": "node scripts/native-smoke.mjs",
     "package": "node scripts/desktop.mjs build",
     "tauri": "tauri",
     "check:versions": "node scripts/check-versions.mjs",

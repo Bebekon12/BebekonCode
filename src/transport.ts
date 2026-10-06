@@ -4,6 +4,19 @@ import { open } from '@tauri-apps/plugin-dialog';
 import type { ClientTransport, AgentEvent } from './contracts';
 
 export const desktop: ClientTransport = {
+  listFiles: (workspaceId, path) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'list', path } }),
+  readFile: (workspaceId, path) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'read', path } }),
+  saveFile: (workspaceId, path, expected, content) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'save', path, expected, content } }),
+  createPath: (workspaceId, path, directory) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'create', path, directory } }),
+  renamePath: (workspaceId, path, destination) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'rename', path, destination } }),
+  deletePath: (workspaceId, path) =>
+    invoke('file_operation', { workspaceId, operation: { kind: 'delete', path } }),
+  openProject: (workspaceId, terminal) => invoke('open_project', { workspaceId, terminal }),
   snapshot: () => invoke('snapshot'),
   chooseFolder: async () => {
     const path = await open({ directory: true, multiple: false, title: 'Add a project folder' });

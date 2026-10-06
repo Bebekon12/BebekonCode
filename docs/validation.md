@@ -1,4 +1,30 @@
-# Validation record: 0.1.0
+# Validation record
+
+## 0.2.0 — 2026-10-06
+
+Passed locally on Windows x64, Rust 1.99.0 MSVC, Node 24.12.0:
+
+- Whole-workspace Cargo fmt/check/test/clippy with warnings denied and locked dependencies.
+- 14 Rust tests including actual disk CRUD, external-save conflicts, reserved/traversal names,
+  binary rejection and a real Windows junction escape attempt with outside-file preservation.
+- Strict TypeScript checking, two replay unit tests, production build and three Edge UI tests.
+- Actual release executable tested in WebView2 via `npm run test:native`: real Tauri IPC and
+  disk create/read/save/rename/delete, Unicode/spaces in paths, CRLF preservation, external
+  save conflict rejection, protected `.git`, traversal denial and dirty-navigation decisions.
+- Native window-close request with unsaved edits was prevented; keeping edits retained the
+  buffer. Global command shortcuts did not replace the editor and discard its text.
+- Native test used an isolated temporary data profile. Default app data was not altered.
+- NSIS `.exe` and MSI packaging succeeded (about 5.5 and 7.5 MiB); standalone executable is
+  about 18.6 MiB. Logo output was inspected and transparent corner alpha confirmed as zero.
+- Prettier, version consistency and Git diff whitespace checks passed.
+
+Native CDP is enabled only by the smoke harness environment for its own process, not by the
+application. A native editor screenshot is emitted to `test-results/native-files.png`.
+Full clean-install/uninstall/upgrade QA, external-console automation, DPI/display coverage,
+custom file ACL preservation, hostile-process race resistance and real provider workflows are
+not established by these tests. Signing and automatic update installation remain unavailable.
+
+## 0.1.0
 
 Date: 2026-10-06. Environment: Windows x64, Rust 1.99.0 stable/MSVC, Node 24.12.0.
 

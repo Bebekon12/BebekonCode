@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Command,
   Folder,
+  FolderOpen,
   FolderPlus,
   GitBranch,
   Layers3,
@@ -34,6 +35,7 @@ import { Dialog } from './components/Dialog';
 import { Timeline } from './components/Timeline';
 import { ContextPanel } from './components/ContextPanel';
 import { Settings } from './components/Settings';
+import { FileManager } from './components/FileManager';
 import product from '../product.json';
 
 export function App() {
@@ -46,7 +48,7 @@ export function App() {
   const [historyPage, setHistoryPage] = useState(false);
   const browsingHistory = useRef(historyPage);
   browsingHistory.current = historyPage;
-  const [dialog, setDialog] = useState<'new' | 'settings' | 'commands' | null>(null);
+  const [dialog, setDialog] = useState<'new' | 'settings' | 'commands' | 'files' | null>(null);
   const [context, setContext] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -252,6 +254,7 @@ export function App() {
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (dialog === 'files') return; // File editor owns its unsaved-change navigation.
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setDialog((current) => (current === 'commands' ? null : 'commands'));
@@ -263,13 +266,13 @@ export function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, []);
+  }, [dialog]);
 
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Projects and sessions">
         <div className="brand">
-          <img src="/mark.svg" alt="" />
+          <img src="/brand/snowman.png" alt="" />
           <span>{product.name}</span>
           <span className="version-label">EARLY ACCESS</span>
         </div>
@@ -347,6 +350,13 @@ export function App() {
           )}
         </div>
         <div className="sidebar-bottom">
+          <button
+            className="sidebar-action"
+            disabled={!client || !workspace}
+            onClick={() => setDialog('files')}
+          >
+            <FolderOpen size={16} /> Project files
+          </button>
           <button className="sidebar-action" onClick={newSession} disabled={busy || !client}>
             <Plus size={16} /> New session <kbd>Ctrl N</kbd>
           </button>
@@ -615,6 +625,14 @@ export function App() {
         </footer>
       </main>
 
+      {dialog === 'files' && client && workspace && (
+        <FileManager
+          key={workspace.id}
+          client={client}
+          workspace={workspace}
+          close={() => setDialog(null)}
+        />
+      )}
       {dialog === 'new' && data && client && (
         <NewSession
           data={data}
