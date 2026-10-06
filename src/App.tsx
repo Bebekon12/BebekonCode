@@ -26,6 +26,9 @@ import { WelcomeHero } from './components/WelcomeHero';
 import { NewSession } from './components/NewSessionDialog';
 import { CommandPalette } from './components/CommandPalette';
 import { PlanWelcome } from './components/PlanWelcome';
+import { ChatControls } from './components/ChatControls';
+import { ChatSettings } from './components/ChatSettings';
+import { modeLabels } from './chat';
 import {
   accountLabel,
   counted,
@@ -49,6 +52,7 @@ export function App() {
   const [context, setContext] = useState(window.innerWidth > 1100);
   const [settingsTab, setSettingsTab] = useState('Основные');
   const [newSessionProvider, setNewSessionProvider] = useState<string>();
+  const [agentDialog, setAgentDialog] = useState<{ id: string; handoff: boolean } | null>(null);
   const showSettings = (tab = 'Основные') => {
     setSettingsTab(tab);
     setDialog('settings');
@@ -73,14 +77,17 @@ export function App() {
   const draft = drafts[sessionId] ?? '';
   const running = session?.status === 'running';
   const homeSessions =
-    data?.sessions.filter((item) => !workspace || item.workspace_id === workspace.id) ?? [];
+    data?.sessions.filter(
+      (item) => !item.parent_session_id && (!workspace || item.workspace_id === workspace.id),
+    ) ?? [];
   const [tabIds, setTabIds] = usePreference<string[]>('project-tabs', []);
   const [sidebarCollapsed, setSidebarCollapsed] = usePreference('sidebar-collapsed', false);
   const [heroHidden, setHeroHidden] = usePreference('hero-hidden', false);
 
   // The open project always has a tab; closing a tab never removes the project itself.
   useEffect(() => {
-    if (workspace && !tabIds.includes(workspace.id)) setTabIds((ids) => [...ids, workspace.id]);
+    if (workspace && workspace.id !== 'chat-scratch' && !tabIds.includes(workspace.id))
+      setTabIds((ids) => [...ids, workspace.id]);
   }, [workspace, tabIds, setTabIds]);
 
   useEffect(() => {
@@ -126,6 +133,22 @@ export function App() {
             }
           : current,
       );
+      if (
+        incoming.some(
+          (event) =>
+            event.payload.type === 'turn_completed' ||
+            event.payload.type === 'session_stopped' ||
+            event.payload.type === 'provider_error' ||
+            (event.payload.type === 'tool_activity' && event.payload.label === 'Подзадача создана'),
+        )
+      ) {
+        void getTransport()
+          .then((transport) => transport.snapshot())
+          .then((snapshot) => {
+            if (alive) setData(snapshot);
+          })
+          .catch((error) => alive && setError(errorText(error)));
+      }
     };
     void (async () => {
       try {
@@ -161,7 +184,7 @@ export function App() {
         setClient(transport);
         setData(snapshot);
         setProjectId(snapshot.workspaces[0]?.id ?? '');
-        setSessionId(snapshot.sessions[0]?.id ?? '');
+        setSessionId(snapshot.sessions.find((s) => !s.parent_session_id)?.id ?? '');
         if (snapshot.settings.check_updates_on_start) {
           const check = await transport.checkReleases(false);
           if (alive) setRelease(check);
@@ -292,11 +315,18 @@ export function App() {
     setProjectId(session.workspace_id);
   };
   const newSession = () => {
-    if (!data?.workspaces.length) addProject();
-    else setDialog('new');
+    setDialog('new');
   };
   const send = () => {
-    if (!client || !session || !draft.trim() || busy || running) return;
+    if (
+      !client ||
+      !session ||
+      !draft.trim() ||
+      busy ||
+      running ||
+      data?.sessions.some((s) => s.id === session.parent_session_id && s.status === 'running')
+    )
+      return;
     const prompt = draft.trim();
     void action(async () => {
       await client.sendMessage(session.id, prompt);
@@ -312,7 +342,7 @@ export function App() {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
-        if (dataRef.current?.workspaces.length) setDialog('new');
+        if (dataRef.current) setDialog('new');
       }
     };
     window.addEventListener('keydown', key);
@@ -324,7 +354,10 @@ export function App() {
   const tabs = tabIds.flatMap((id) => data?.workspaces.find((item) => item.id === id) ?? []);
   const selectProject = (id: string) => {
     setProjectId(id);
-    setSessionId(data?.sessions.find((session) => session.workspace_id === id)?.id ?? '');
+    setSessionId(
+      data?.sessions.find((session) => !session.parent_session_id && session.workspace_id === id)
+        ?.id ?? '',
+    );
   };
   const closeTab = (id: string) => {
     const index = tabs.findIndex((tab) => tab.id === id);
@@ -341,7 +374,7 @@ export function App() {
   const cancelCurrent = () => client && session && void action(() => client.cancel(session.id));
   const hero = !heroHidden && (
     <WelcomeHero
-      start={data?.workspaces.length ? newSession : addProject}
+      start={newSession}
       providers={() => showSettings('Провайдеры')}
       hide={() => setHeroHidden(true)}
       disabled={busy || !client}
@@ -414,7 +447,55 @@ export function App() {
           <div className="conversation-column">
             {session ? (
               <>
-                {hero && <div className="hero-slot in-session">{hero}</div>}
+                <div className="chat-title chat-titlebar">
+                  <strong>{sessionTitle(session.title)}</strong>
+                  <span>
+                    {modeLabels[session.chat_mode]}
+                    {session.workspace_id === 'chat-scratch' ? ' · без проекта' : ''} ·{' '}
+                    {accountLabel(account)}
+                  </span>
+                </div>
+                {session.parent_session_id && (
+                  <div className="chat-branches">
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        const parent = data?.sessions.find(
+                          (s) => s.id === session.parent_session_id,
+                        );
+                        if (parent) selectSession(parent);
+                      }}
+                    >
+                      ← Вернуться в основной чат
+                    </button>
+                    <span>Отдельный контекст · общая задача</span>
+                  </div>
+                )}
+                {session.chat_mode !== 'single' && session.chat_mode !== 'task' && (
+                  <div className="chat-branches" aria-label="Участники и подзадачи">
+                    {data?.sessions
+                      .filter((s) => s.parent_session_id === session.id)
+                      .map((s) => (
+                        <span className="branch-chip" key={s.id}>
+                          <button onClick={() => selectSession(s)} title={s.model}>
+                            {s.chat_mode === 'task' ? 'Подзадача' : 'Участник'}:{' '}
+                            {s.title || s.role || s.model}
+                            <span className={`status-dot ${s.status}`} />
+                          </button>
+                          {s.chat_mode !== 'task' && (
+                            <button
+                              className="icon-button"
+                              aria-label={`Настроить ${s.role || s.model}`}
+                              disabled={running}
+                              onClick={() => setAgentDialog({ id: s.id, handoff: false })}
+                            >
+                              <Settings2 size={13} />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                  </div>
+                )}
                 {historyPage && (
                   <button
                     className="history-banner"
@@ -458,9 +539,7 @@ export function App() {
                       : undefined
                   }
                   chooseAnotherAccount={() => {
-                    setNewSessionProvider(session.provider);
-                    setProjectId(session.workspace_id);
-                    setDialog('new');
+                    setAgentDialog({ id: session.id, handoff: true });
                   }}
                   events={events.filter((event) => event.session_id === session.id)}
                   loadOlder={() => {
@@ -476,6 +555,32 @@ export function App() {
                   }}
                 />
                 <Composer
+                  controls={
+                    client && (
+                      <ChatControls
+                        client={client}
+                        session={session}
+                        busy={busy}
+                        configure={(config) =>
+                          void action(async () => {
+                            const updated = await client.configureSession(session.id, config);
+                            setData((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    sessions: current.sessions.map((s) =>
+                                      s.id === updated.id ? updated : s,
+                                    ),
+                                  }
+                                : current,
+                            );
+                          })
+                        }
+                        settings={() => setAgentDialog({ id: session.id, handoff: false })}
+                        handoff={() => setAgentDialog({ id: session.id, handoff: true })}
+                      />
+                    )
+                  }
                   ref={composer}
                   draft={draft}
                   setDraft={(value) =>
@@ -485,10 +590,6 @@ export function App() {
                   busy={busy}
                   send={send}
                   cancel={cancelCurrent}
-                  providerName={providerName(session.provider)}
-                  model={session.model}
-                  account={accountLabel(account)}
-                  permissions={permissionLabel(session.permission_profile)}
                   demo={session.provider === 'mock'}
                   manageUsage={
                     session.provider === 'openai' && client
@@ -501,8 +602,12 @@ export function App() {
               <div className="dashboard">
                 {hero}
                 <div className="dashboard-heading">
-                  <h2>{workspace ? `Сессии · ${workspace.name}` : 'Ваши сессии'}</h2>
-                  <span>{counted(homeSessions.length, ['сессия', 'сессии', 'сессий'])}</span>
+                  <h2>
+                    {workspace && workspace.id !== 'chat-scratch'
+                      ? `Чаты · ${workspace.name}`
+                      : 'Ваши чаты'}
+                  </h2>
+                  <span>{counted(homeSessions.length, ['чат', 'чата', 'чатов'])}</span>
                 </div>
                 {homeSessions.map((item) => (
                   <button
@@ -517,7 +622,7 @@ export function App() {
                       <strong>{sessionTitle(item.title)}</strong>
                       <small>
                         {data?.workspaces.find((project) => project.id === item.workspace_id)?.name}{' '}
-                        · {providerName(item.provider)} · {item.model}
+                        · {modeLabels[item.chat_mode]} · {item.model}
                       </small>
                     </span>
                     <span className={`step-pill ${item.status}`}>{statusLabels[item.status]}</span>
@@ -531,26 +636,29 @@ export function App() {
                     </div>
                     {workspace ? (
                       <>
-                        <h2>В проекте пока нет сессий</h2>
+                        <h2>В проекте пока нет чатов</h2>
                         <p>Выберите агента и опишите задачу — история сохранится локально.</p>
                         <button
                           className="secondary-button"
                           onClick={() => setDialog('new')}
                           disabled={busy || !client}
                         >
-                          <Plus size={16} /> Начать сессию
+                          <Plus size={16} /> Новый чат
                         </button>
                       </>
                     ) : (
                       <>
-                        <h2>Начните с папки проекта</h2>
-                        <p>Откройте локальную папку, затем создайте первую сессию.</p>
+                        <h2>Что хотите сделать?</h2>
+                        <p>
+                          Создайте чат для вопроса или задачи. Папку проекта можно выбрать при
+                          создании.
+                        </p>
                         <button
                           className="secondary-button"
-                          onClick={addProject}
+                          onClick={newSession}
                           disabled={busy || !client}
                         >
-                          <FolderPlus size={16} /> Добавить первый проект
+                          <Plus size={16} /> Новый чат
                         </button>
                       </>
                     )}
@@ -559,10 +667,10 @@ export function App() {
                 <div className="dashboard-note">
                   <ShieldCheck size={18} />
                   <div>
-                    <strong>Сейчас доступен локальный симулятор</strong>
+                    <strong>Подключите свой аккаунт и начните разговор</strong>
                     <p>
-                      Он демонстрирует поток ответов и сохраняет историю. Подключение AI-провайдеров
-                      ещё в разработке. Файлы можно редактировать вручную.
+                      Выберите обычный чат, команду или авторазбиение. Модель, рассуждение и доступ
+                      настраиваются в чате. История сохраняется на компьютере.
                     </p>
                   </div>
                 </div>
@@ -625,10 +733,8 @@ export function App() {
           }}
           create={(input) =>
             void action(async () => {
-              const session = await client.createSession(input);
-              setData((current) =>
-                current ? { ...current, sessions: [session, ...current.sessions] } : current,
-              );
+              const session = await client.createChat(input);
+              setData(await client.snapshot());
               selectSession(session);
               setDialog(null);
               setTimeout(() => composer.current?.focus(), 0);
@@ -658,6 +764,25 @@ export function App() {
           }
         />
       )}
+      {agentDialog && client && data && data.sessions.find((s) => s.id === agentDialog.id) && (
+        <ChatSettings
+          key={agentDialog.id + String(agentDialog.handoff)}
+          client={client}
+          data={data}
+          session={data.sessions.find((s) => s.id === agentDialog.id)!}
+          handoff={agentDialog.handoff}
+          busy={busy}
+          close={() => setAgentDialog(null)}
+          save={(config, transition) =>
+            void action(async () => {
+              if (transition) await client.handoff(agentDialog.id, config);
+              else await client.configureSession(agentDialog.id, config);
+              setData(await client.snapshot());
+              setAgentDialog(null);
+            })
+          }
+        />
+      )}
       {planWelcome && client && (
         <PlanWelcome
           close={() => setPlanWelcome('')}
@@ -666,14 +791,14 @@ export function App() {
       )}
       {dialog === 'commands' && data && (
         <CommandPalette
-          sessions={data.sessions}
+          sessions={data.sessions.filter((s) => !s.parent_session_id)}
           close={() => setDialog(null)}
           run={(command) => {
             setDialog(null);
             command();
           }}
           commands={[
-            { label: 'Новая сессия агента', icon: <Plus size={16} />, action: newSession },
+            { label: 'Новый чат', icon: <Plus size={16} />, action: newSession },
             { label: 'Добавить папку проекта', icon: <FolderPlus size={16} />, action: addProject },
             {
               label: 'Открыть настройки',

@@ -35,6 +35,40 @@ pub struct Session {
     pub worktree_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub reasoning_effort: Option<String>,
+    pub tool_policy: String,
+    pub parent_session_id: Option<String>,
+    pub chat_mode: String,
+    pub role: String,
+    pub context_summary: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolPolicy {
+    pub plugins: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<String>>,
+    pub skills: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    pub provider: String,
+    pub account_profile_id: String,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
+    pub permission_profile: String,
+    #[serde(default)]
+    pub tools: ToolPolicy,
+    #[serde(default)]
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateChat {
+    pub workspace_id: Option<String>,
+    pub mode: String,
+    pub agents: Vec<AgentConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +88,12 @@ pub enum EventPayload {
     },
     AssistantTextDelta {
         text: String,
+    },
+    AgentConfiguration {
+        provider: String,
+        model: String,
+        account_profile_id: String,
+        reasoning_effort: Option<String>,
     },
     ToolActivity {
         label: String,
@@ -128,6 +168,8 @@ pub struct ModelInfo {
     pub name: String,
     pub description: String,
     pub is_default: bool,
+    pub reasoning_efforts: Vec<String>,
+    pub default_reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -140,6 +182,7 @@ pub struct Extensions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionItem {
+    pub id: String,
     pub name: String,
     pub detail: Option<String>,
     pub enabled: bool,

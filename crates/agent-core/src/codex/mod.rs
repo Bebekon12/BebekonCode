@@ -242,6 +242,8 @@ impl CodexProvider {
                     "model_providers.openai_chatgpt_plan.wire_api=\"responses\"",
                     "model_providers.openai_chatgpt_plan.requires_openai_auth=false",
                     "model_providers.openai_chatgpt_plan.supports_websockets=false",
+                    "shell_environment_policy.inherit=\"core\"",
+                    "shell_environment_policy.ignore_default_excludes=false",
                 ]
                 .into_iter()
                 .flat_map(|value| ["-c", value]),
@@ -380,21 +382,40 @@ impl CodexProvider {
     ) -> Result<String> {
         let session = &request.session;
         let read_only = session.permission_profile == "read_only";
+        let policy: crate::model::ToolPolicy = serde_json::from_str(&session.tool_policy)?;
+        let extensions = if policy.mcp_servers.is_some() || policy.skills.is_some() {
+            Some(self.extensions(&request.account).await?)
+        } else {
+            None
+        };
+        let mut config = serde_json::Map::new();
+        if let Some(extensions) = &extensions {
+            if !extensions.errors.is_empty() {
+                return Err(CoreError::Invalid(
+                    "Не удалось применить инструменты чата".into(),
+                ));
+            }
+            if let Some(selected) = &policy.mcp_servers {
+                for item in &extensions.mcp_servers {
+                    config.insert(
+                        format!("mcp_servers.{:?}.enabled", item.id),
+                        json!(selected.contains(&item.id) && item.enabled),
+                    );
+                }
+            }
+            if let Some(selected) = &policy.skills {
+                config.insert("skills.config".into(), json!(extensions.skills.iter().map(|item| json!({"path": std::path::Path::new(&item.id).parent().unwrap_or(std::path::Path::new(&item.id)).to_string_lossy(), "enabled": selected.contains(&item.id) && item.enabled})).collect::<Vec<_>>()));
+            }
+        }
         let common = json!({
             "cwd": plain_path(&session.working_directory),
             "model": session.model,
             "approvalPolicy": "on-request",
             "sandbox": if read_only { "read-only" } else { "workspace-write" },
+            "config": config,
         });
         if let Some(thread) = &session.provider_session_id {
-            let loaded = server
-                .loaded
-                .lock()
-                .map(|loaded| loaded.contains(thread))
-                .unwrap_or(false);
-            if loaded {
-                return Ok(thread.clone());
-            }
+            // Resume re-applies thread-local extension overrides, including returning to defaults.
             let mut params = common.clone();
             params["threadId"] = json!(thread);
             match server
@@ -408,15 +429,8 @@ impl CodexProvider {
                     }
                     return Ok(thread.clone());
                 }
-                Err(RpcError::Server { .. }) => {
-                    let _ = events
-                        .send(EventPayload::ToolActivity {
-                            label: "Новый поток Codex".into(),
-                            detail: "Прежний поток не найден; Codex начинает новый без истории"
-                                .into(),
-                        })
-                        .await;
-                }
+                // Do not discard history on an invalid override or an unavailable saved thread.
+                // The user can explicitly hand off into a new conversation with a summary.
                 Err(error) => return Err(provider_error(error, server.last_error())),
             }
         }
@@ -612,6 +626,15 @@ impl AgentProvider for CodexProvider {
                     name: str_at(model, "displayName").unwrap_or(id).into(),
                     description: str_at(model, "description").unwrap_or_default().into(),
                     is_default: model.get("isDefault").and_then(Value::as_bool) == Some(true),
+                    reasoning_efforts: model
+                        .get("supportedReasoningEfforts")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|value| str_at(value, "reasoningEffort").map(str::to_string))
+                        .collect(),
+                    default_reasoning_effort: str_at(model, "defaultReasoningEffort")
+                        .map(str::to_string),
                 });
             }
             cursor = page.get("nextCursor").cloned().unwrap_or(Value::Null);
@@ -758,6 +781,7 @@ impl AgentProvider for CodexProvider {
                     .filter(|plugin| plugin.get("installed").and_then(Value::as_bool) == Some(true))
                 {
                     extensions.plugins.push(ExtensionItem {
+                        id: str_at(plugin, "id").unwrap_or_default().into(),
                         name: str_at(plugin, "name").unwrap_or("Плагин").into(),
                         detail: str_at(plugin, "version").map(str::to_string),
                         enabled: plugin.get("enabled").and_then(Value::as_bool) == Some(true),
@@ -770,27 +794,54 @@ impl AgentProvider for CodexProvider {
                 .push("Не удалось получить список плагинов".into()),
         }
         match mcp {
-            Ok(value) => {
-                for server in value
-                    .get("data")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    let tools = server
-                        .get("tools")
-                        .and_then(Value::as_object)
-                        .map(|tools| tools.len())
-                        .unwrap_or(0);
-                    extensions.mcp_servers.push(ExtensionItem {
-                        name: str_at(server, "name").unwrap_or("MCP").into(),
-                        detail: Some(format!("инструментов: {tools}")),
-                        enabled: server.get("toolsError").is_none_or(Value::is_null),
-                        status: server
-                            .get("authStatus")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                    });
+            Ok(mut value) => {
+                let mut pages = 0;
+                loop {
+                    for server in value
+                        .get("data")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        let tools = server
+                            .get("tools")
+                            .and_then(Value::as_object)
+                            .map(|tools| tools.len())
+                            .unwrap_or(0);
+                        extensions.mcp_servers.push(ExtensionItem {
+                            id: str_at(server, "name").unwrap_or_default().into(),
+                            name: str_at(server, "name").unwrap_or("MCP").into(),
+                            detail: Some(format!("инструментов: {tools}")),
+                            enabled: server.get("toolsError").is_none_or(Value::is_null),
+                            status: server
+                                .get("authStatus")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                        });
+                    }
+                    let cursor = value.get("nextCursor").cloned().unwrap_or(Value::Null);
+                    if cursor.is_null() {
+                        break;
+                    }
+                    pages += 1;
+                    if pages >= 10 {
+                        extensions.errors.push(
+                            "Слишком большой список MCP-серверов; выбор инструментов не применён"
+                                .into(),
+                        );
+                        break;
+                    }
+                    match request("mcpServerStatus/list", json!({"cursor":cursor,"limit":100}))
+                        .await
+                    {
+                        Ok(next) => value = next,
+                        Err(_) => {
+                            extensions
+                                .errors
+                                .push("Не удалось получить полный список MCP-серверов".into());
+                            break;
+                        }
+                    }
                 }
             }
             Err(_) => extensions
@@ -813,6 +864,7 @@ impl AgentProvider for CodexProvider {
                     })
                 {
                     extensions.skills.push(ExtensionItem {
+                        id: str_at(skill, "path").unwrap_or_default().into(),
                         name: str_at(skill, "name").unwrap_or("Навык").into(),
                         detail: str_at(skill, "shortDescription")
                             .or_else(|| str_at(skill, "description"))
@@ -931,6 +983,39 @@ impl CodexProvider {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let mut state = TurnState::new(thread);
+        let effort = if let Some(effort) = &request.session.reasoning_effort {
+            Some(effort.clone())
+        } else {
+            self.models(&request.account)
+                .await?
+                .into_iter()
+                .find(|m| m.id == request.session.model)
+                .and_then(|m| m.default_reasoning_effort)
+        };
+        let policy: crate::model::ToolPolicy = serde_json::from_str(&request.session.tool_policy)?;
+        let disabled_plugins = if let Some(selected) = &policy.plugins {
+            let extensions = self.extensions(&request.account).await?;
+            if !extensions.errors.is_empty() {
+                return Err(CoreError::Invalid(
+                    "Не удалось применить выбранные плагины чата".into(),
+                ));
+            }
+            Some(
+                extensions
+                    .plugins
+                    .into_iter()
+                    .filter(|item| !selected.contains(&item.id))
+                    .map(|item| item.id)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+        let sandbox = if request.session.permission_profile == "read_only" {
+            json!({"type":"readOnly", "networkAccess":false})
+        } else {
+            json!({"type":"workspaceWrite", "writableRoots":[plain_path(&request.session.working_directory)], "networkAccess":false})
+        };
         let started = server
             .peer
             .request(
@@ -938,6 +1023,12 @@ impl CodexProvider {
                 json!({
                     "threadId": thread,
                     "input": [{ "type": "text", "text": request.prompt }],
+                    "model": request.session.model,
+                    "effort": effort,
+                    "approvalPolicy": "on-request",
+                    "sandboxPolicy": sandbox,
+                    "disabledPluginIds": disabled_plugins,
+                    "outputSchema": request.output_schema,
                 }),
                 REQUEST_TIMEOUT,
             )
@@ -950,6 +1041,7 @@ impl CodexProvider {
 
         let closed = server.peer.closed();
         let mut interrupt_deadline: Option<tokio::time::Instant> = None;
+        let mut structured_result: Option<String> = None;
         loop {
             let deadline = interrupt_deadline;
             let message = tokio::select! {
@@ -981,16 +1073,49 @@ impl CodexProvider {
             };
             match message {
                 Ok(Incoming::Notification { method, params }) => {
+                    if request.output_schema.is_some()
+                        && state.owns(&params)
+                        && method == "item/completed"
+                    {
+                        if let Some(item) = params.get("item") {
+                            if str_at(item, "type") == Some("agentMessage")
+                                && str_at(item, "phase") != Some("commentary")
+                            {
+                                structured_result = str_at(item, "text").map(str::to_string);
+                            }
+                        }
+                    }
                     for mapped in map_notification(&method, &params, &mut state) {
                         match mapped {
                             Mapped::Event(event) => {
+                                if request.output_schema.is_some()
+                                    && matches!(event, EventPayload::AssistantTextDelta { .. })
+                                {
+                                    continue;
+                                }
                                 if events.send(event).await.is_err() {
                                     return Ok(());
                                 }
                             }
-                            Mapped::Finished(TurnEnd::Completed | TurnEnd::Interrupted) => {
-                                return Ok(())
+                            Mapped::Finished(TurnEnd::Completed) => {
+                                if request.output_schema.is_some() {
+                                    let text = structured_result.take().ok_or_else(|| {
+                                        CoreError::Invalid(
+                                            "Codex не вернул итоговый структурированный ответ"
+                                                .into(),
+                                        )
+                                    })?;
+                                    if events
+                                        .send(EventPayload::AssistantTextDelta { text })
+                                        .await
+                                        .is_err()
+                                    {
+                                        return Ok(());
+                                    }
+                                }
+                                return Ok(());
                             }
+                            Mapped::Finished(TurnEnd::Interrupted) => return Ok(()),
                             Mapped::Finished(TurnEnd::Failed { message, kind }) => {
                                 return Err(CoreError::Provider { message, kind })
                             }

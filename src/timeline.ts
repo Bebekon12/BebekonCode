@@ -18,6 +18,8 @@ export interface TimelineTurn {
   id: string;
   prompt: string;
   text: string;
+  provider?: string;
+  model?: string;
   activities: TimelineActivity[];
   status: SessionStatus;
   startedAt: number;
@@ -54,6 +56,10 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
         break;
       case 'assistant_text_delta':
         turn.text += event.payload.text;
+        break;
+      case 'agent_configuration':
+        turn.provider = event.payload.provider;
+        turn.model = event.payload.model;
         break;
       case 'tool_activity':
         turn.activities.push({

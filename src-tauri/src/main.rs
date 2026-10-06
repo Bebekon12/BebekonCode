@@ -167,6 +167,38 @@ async fn create_session(input: CreateSession, state: State<'_, AppState>) -> Ipc
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
+async fn create_chat(input: CreateChat, state: State<'_, AppState>) -> IpcResult<Session> {
+    state
+        .core
+        .create_chat(input)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn configure_session(
+    session_id: String,
+    config: AgentConfig,
+    state: State<'_, AppState>,
+) -> IpcResult<Session> {
+    state
+        .core
+        .configure_session(&session_id, config)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn handoff_session(
+    session_id: String,
+    config: AgentConfig,
+    state: State<'_, AppState>,
+) -> IpcResult<String> {
+    state
+        .core
+        .handoff(&session_id, config)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
 async fn send_message(
     session_id: String,
     prompt: String,
@@ -491,6 +523,9 @@ fn main() {
             snapshot,
             add_workspace,
             create_session,
+            create_chat,
+            configure_session,
+            handoff_session,
             send_message,
             cancel_session,
             session_events,

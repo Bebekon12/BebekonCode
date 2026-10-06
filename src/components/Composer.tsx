@@ -1,5 +1,5 @@
-import { forwardRef } from 'react';
-import { ArrowUp, ArrowUpRight, ShieldCheck, Sparkles, Square } from 'lucide-react';
+import { forwardRef, type ReactNode } from 'react';
+import { ArrowUp, ArrowUpRight, Square } from 'lucide-react';
 
 export const Composer = forwardRef<
   HTMLTextAreaElement,
@@ -10,29 +10,13 @@ export const Composer = forwardRef<
     busy: boolean;
     send: () => void;
     cancel: () => void;
-    providerName: string;
-    model: string;
-    account: string;
-    permissions: string;
+    controls: ReactNode;
     demo: boolean;
     /** Shown when requests use the user's ChatGPT plan (Sign in with ChatGPT guidelines). */
     manageUsage?: () => void;
   }
 >(function Composer(
-  {
-    draft,
-    setDraft,
-    running,
-    busy,
-    send,
-    cancel,
-    providerName,
-    model,
-    account,
-    permissions,
-    demo,
-    manageUsage,
-  },
+  { draft, setDraft, running, busy, send, cancel, controls, demo, manageUsage },
   ref,
 ) {
   return (
@@ -58,20 +42,8 @@ export const Composer = forwardRef<
           }}
         />
         <div className="composer-toolbar">
-          <div className="composer-controls" aria-label="Параметры сессии">
-            <span className="control-pill" title="Агент сессии">
-              <Sparkles size={13} /> {providerName}
-            </span>
-            <span className="control-pill" title="Модель">
-              {model}
-            </span>
-            <span className="control-pill account-pill" title="Аккаунт">
-              {account}
-            </span>
-            <span className="permission-pill" title="Профиль разрешений">
-              <ShieldCheck size={13} />
-              {permissions}
-            </span>
+          <div className="composer-controls" aria-label="Параметры чата">
+            {controls}
           </div>
           {running ? (
             <button
@@ -97,7 +69,7 @@ export const Composer = forwardRef<
         <span>
           {demo
             ? 'Локальный симулятор · файлы проекта не читает и не меняет'
-            : 'Провайдер и аккаунт сессии не меняются автоматически'}
+            : 'Контекст сжимается Codex автоматически · смена провайдера через «Перейти»'}
           {manageUsage && (
             <>
               {' · '}

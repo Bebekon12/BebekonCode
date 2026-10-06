@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 
 if (process.platform !== 'win32') throw new Error('Native smoke requires Windows');
 const binary = path.resolve('target/release/bebekoncode-desktop.exe');
@@ -170,7 +170,7 @@ try {
   );
   await page.reload();
   // Legacy persisted title 'New session' is presented in Russian without a DB rewrite.
-  await page.locator('.session-title', { hasText: /^Новая сессия$/ }).waitFor();
+  await page.locator('.session-title', { hasText: /^Новый чат$/ }).waitFor();
   await page.getByText('Ожидает задачи', { exact: true }).first().waitFor();
   assert.equal(await page.getByText('Local demo', { exact: true }).count(), 0);
   const composer = page.getByRole('textbox', { name: 'Сообщение агенту' });
@@ -180,6 +180,89 @@ try {
   await page.getByRole('button', { name: 'Остановить агента', exact: true }).click();
   await page.getByText(/^Остановлено вами/).waitFor();
   await page.screenshot({ path: 'test-results/native-russian.png' });
+  // New chat commands use real Rust + SQLite in this isolated profile.
+  const agent = {
+    provider: 'mock',
+    account_profile_id: 'mock-local',
+    model: 'mock-stream-v1',
+    reasoning_effort: null,
+    permission_profile: 'standard',
+    tools: {},
+    role: '',
+  };
+  const chat = await page.evaluate(
+    (agent) =>
+      window.__TAURI_INTERNALS__.invoke('create_chat', {
+        input: { workspace_id: null, mode: 'auto', agents: [agent] },
+      }),
+    agent,
+  );
+  assert.equal(chat.workspace_id, 'chat-scratch');
+  await page.evaluate(
+    ({ id, agent }) =>
+      window.__TAURI_INTERNALS__.invoke('configure_session', {
+        sessionId: id,
+        config: { ...agent, permission_profile: 'read_only' },
+      }),
+    { id: chat.id, agent },
+  );
+  await page.evaluate(
+    (id) =>
+      window.__TAURI_INTERNALS__.invoke('send_message', {
+        sessionId: id,
+        prompt: 'Демо: проверить два независимых контекста',
+      }),
+    chat.id,
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (id) => {
+          const snapshot = await window.__TAURI_INTERNALS__.invoke('snapshot');
+          return snapshot.sessions.find((s) => s.id === id)?.status;
+        }, chat.id),
+      { timeout: 30_000 },
+    )
+    .toBe('completed');
+  const tasks = await page.evaluate(
+    (id) =>
+      window.__TAURI_INTERNALS__
+        .invoke('snapshot')
+        .then((snapshot) => snapshot.sessions.filter((s) => s.parent_session_id === id)),
+    chat.id,
+  );
+  assert.equal(tasks.length, 2);
+  assert(
+    tasks.every(
+      (s) =>
+        s.permission_profile === 'read_only' && s.provider !== 'openai' && s.status === 'completed',
+    ),
+  );
+  await page.evaluate(
+    ({ id, agent }) =>
+      window.__TAURI_INTERNALS__.invoke('handoff_session', { sessionId: id, config: agent }),
+    { id: chat.id, agent },
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (id) => {
+          const snapshot = await window.__TAURI_INTERNALS__.invoke('snapshot');
+          const chat = snapshot.sessions.find((s) => s.id === id);
+          return chat?.status === 'completed' && chat.context_summary.length > 0;
+        }, chat.id),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  await page.reload();
+  await page
+    .getByText('Демо: проверить два независимых контекста', { exact: true })
+    .first()
+    .waitFor();
+  await page.screenshot({ path: 'test-results/native-chats.png' });
+  console.log(
+    'PASS: native chat without project, configuration, parallel demo contexts, handoff and persisted history',
+  );
   if (process.argv.includes('--updates')) {
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await page

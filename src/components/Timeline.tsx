@@ -98,6 +98,7 @@ export function Timeline({
     [events, demo],
   );
   const [filter, setFilter] = useState<TimelineFilter>('all');
+  const [showDetails, setShowDetails] = useState(false);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const visibleTurns = useMemo(() => filterTimeline(turns, filter, query), [turns, filter, query]);
@@ -125,47 +126,62 @@ export function Timeline({
   const overview = filter === 'all' && !query.trim();
   return (
     <>
-      <div className="event-toolbar" role="toolbar" aria-label="Фильтры событий">
-        {filters.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            className={filter === id ? 'active' : ''}
-            aria-pressed={filter === id}
-            onClick={() => setFilter(id)}
-          >
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-        <span className="toolbar-divider" aria-hidden="true" />
-        <button onClick={openFiles}>
-          <FolderOpen size={14} /> Файлы
-        </button>
-        <button onClick={openTerminal}>
-          <Terminal size={14} /> Терминал
-        </button>
-        <label className="event-search">
-          <Search size={14} />
-          <input
-            aria-label="Поиск по событиям"
-            placeholder="Поиск по событиям…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+      <div className="chat-history-switch">
         <button
-          className="icon-button toolbar-square"
-          aria-label={allCollapsed ? 'Развернуть все этапы' : 'Свернуть все этапы'}
-          title={allCollapsed ? 'Развернуть все этапы' : 'Свернуть все этапы'}
-          disabled={!turns.length}
-          onClick={() =>
-            setCollapsed(allCollapsed ? new Set() : new Set(turns.map((turn) => turn.id)))
-          }
+          className="text-button"
+          aria-expanded={showDetails}
+          onClick={() => {
+            setShowDetails(!showDetails);
+            setFilter('all');
+          }}
         >
-          {allCollapsed ? <ListChevronsUpDown size={16} /> : <ListChevronsDownUp size={16} />}
+          {' '}
+          {showDetails ? 'Скрыть фильтры' : 'Поиск и фильтры истории'} <ChevronDown size={12} />
         </button>
       </div>
+      {showDetails && (
+        <div className="event-toolbar" role="toolbar" aria-label="Фильтры событий">
+          {filters.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              className={filter === id ? 'active' : ''}
+              aria-pressed={filter === id}
+              onClick={() => setFilter(id)}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+          <span className="toolbar-divider" aria-hidden="true" />
+          <button onClick={openFiles}>
+            <FolderOpen size={14} /> Файлы
+          </button>
+          <button onClick={openTerminal}>
+            <Terminal size={14} /> Терминал
+          </button>
+          <label className="event-search">
+            <Search size={14} />
+            <input
+              aria-label="Поиск по событиям"
+              placeholder="Поиск по событиям…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <button
+            className="icon-button toolbar-square"
+            aria-label={allCollapsed ? 'Развернуть все этапы' : 'Свернуть все этапы'}
+            title={allCollapsed ? 'Развернуть все этапы' : 'Свернуть все этапы'}
+            disabled={!turns.length}
+            onClick={() =>
+              setCollapsed(allCollapsed ? new Set() : new Set(turns.map((turn) => turn.id)))
+            }
+          >
+            {allCollapsed ? <ListChevronsUpDown size={16} /> : <ListChevronsDownUp size={16} />}
+          </button>
+        </div>
+      )}
       <div
-        className="timeline"
+        className="timeline chat-timeline"
         ref={scroll}
         onScroll={() => {
           const element = scroll.current;
@@ -181,10 +197,10 @@ export function Timeline({
               </button>
             </li>
           )}
-          {overview && (
+          {overview && !turns.length && (
             <Step
               state="ready"
-              title="Сессия запущена"
+              title="Над чем будем работать?"
               subtitle={
                 demo ? 'Локальный симулятор готов к работе' : 'Агент подключён и готов к работе'
               }
@@ -211,8 +227,14 @@ export function Timeline({
               turn={turn}
               filter={filter}
               demo={demo}
-              providerName={providerName}
-              model={session.model}
+              providerName={
+                turn.provider
+                  ? ({ openai: 'OpenAI / Codex', mock: 'Локальное демо', anthropic: 'Claude Code' }[
+                      turn.provider
+                    ] ?? turn.provider)
+                  : providerName
+              }
+              model={turn.model ?? session.model}
               interrupted={interrupted}
               live={running}
               open={!collapsed.has(turn.id)}
@@ -378,19 +400,23 @@ function TurnStep({
         </div>
       )}
       {filter !== 'agent' && turn.activities.length > 0 && (
-        <ul className="activity-table" aria-label="Действия инструментов">
-          {turn.activities.map((activity, index) => (
-            <li key={`${turn.id}-${index}`}>
-              <Wrench size={14} className="activity-icon" />
-              <span className="activity-label">{activity.label}</span>
-              <span className="activity-detail" title={activity.detail}>
-                {activity.detail}
-              </span>
-              {demo && <span className="demo-label">ДЕМО</span>}
-              <time>{clock(activity.timestamp)}</time>
-            </li>
-          ))}
-        </ul>
+        <details className="chat-activity-details" open={filter === 'tools' ? true : undefined}>
+          <summary>Действия агента · {turn.activities.length}</summary>
+          <ul className="activity-table" aria-label="Действия инструментов">
+            {turn.activities.map((activity, index) => (
+              <li key={`${turn.id}-${index}`}>
+                <Wrench size={14} className="activity-icon" />
+                <span className="activity-label">{activity.label}</span>
+                <details className="activity-detail">
+                  <summary>{activity.detail.slice(0, 100)}</summary>
+                  <pre>{activity.detail}</pre>
+                </details>
+                {demo && <span className="demo-label">ДЕМО</span>}
+                <time>{clock(activity.timestamp)}</time>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {filter !== 'agent' &&
         turn.approvals.map((approval) => (

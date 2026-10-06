@@ -9,7 +9,7 @@ export const statusLabels: Record<SessionStatus, string> = {
   failed: 'Ошибка',
   interrupted: 'Прервано',
 };
-export const sessionTitle = (title: string) => (title === 'New session' ? 'Новая сессия' : title);
+export const sessionTitle = (title: string) => (title === 'New session' ? 'Новый чат' : title);
 export function accountLabel(account?: AccountProfile): string {
   if (!account) return '—';
   return account.id === 'mock-local' && account.label === 'Local demo'

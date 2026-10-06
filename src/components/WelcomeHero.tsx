@@ -27,10 +27,10 @@ export function WelcomeHero({
         <p>Создавайте, исследуйте, тестируйте — всё в одном пространстве.</p>
         <div className="welcome-actions">
           <button className="primary-button" onClick={start} disabled={disabled}>
-            <Plus size={17} /> Новая сессия
+            <Plus size={17} /> Новый чат
           </button>
           <button className="secondary-button" onClick={providers} disabled={disabled}>
-            <Layers3 size={16} /> Выбрать провайдера
+            <Layers3 size={16} /> Подключить аккаунт
           </button>
         </div>
       </div>

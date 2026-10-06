@@ -5,7 +5,6 @@ import {
   Cpu,
   Folder,
   FolderOpen,
-  FolderPlus,
   Home,
   Plus,
   Settings2,
@@ -52,10 +51,8 @@ export function Sidebar({
 }) {
   const nav = [
     { label: 'Главная', icon: Home, action: goHome, active: home, enabled: true },
-    { label: 'Мои проекты', icon: FolderPlus, action: addProject, enabled: !disabled },
-    { label: 'Агенты', icon: Sparkles, action: newSession, enabled: !disabled },
     {
-      label: 'Провайдеры',
+      label: 'Аккаунты',
       icon: Cpu,
       action: () => showSettings('Провайдеры'),
       enabled: !!data,
@@ -64,15 +61,15 @@ export function Sidebar({
     { label: 'Настройки', icon: Settings2, action: () => showSettings(), enabled: !!data },
   ];
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="Проекты и сессии">
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="Проекты и чаты">
       <button
         className="new-session-button"
         onClick={newSession}
         disabled={disabled}
-        title="Новая сессия (Ctrl+N)"
+        title="Новый чат (Ctrl+N)"
       >
         <Plus size={18} />
-        <span className="sidebar-label">Новая сессия</span>
+        <span className="sidebar-label">Новый чат</span>
         <ChevronRight size={16} className="sidebar-label" />
       </button>
       <nav className="primary-nav" aria-label="Навигация">
@@ -90,59 +87,91 @@ export function Sidebar({
         ))}
       </nav>
       <div className="sidebar-heading sidebar-label">
-        <span>РАБОЧИЕ ОБЛАСТИ</span>
+        <span>ЧАТЫ</span>
       </div>
       <div className="workspace-list">
-        {data?.workspaces.map((project) => {
-          const current = workspace?.id === project.id;
-          const sessions = data.sessions.filter((session) => session.workspace_id === project.id);
-          return (
-            <section className="workspace-group" key={project.id}>
-              <button
-                className={`project-button ${current ? 'current-project' : ''}`}
-                aria-expanded={current}
-                onClick={() => selectProject(project.id)}
-                title={collapsed ? project.name : displayPath(project.root)}
-              >
-                <Folder size={16} />
-                <span className="sidebar-label project-name">{project.name}</span>
-                {current && <span className="project-active-dot" aria-label="Открыт" />}
-              </button>
-              {current && !collapsed && (
-                <div className="project-sessions">
-                  {sessions.map((item) => (
-                    <button
-                      className={`session-button ${sessionId === item.id ? 'selected' : ''}`}
-                      key={item.id}
-                      onClick={() => selectSession(item)}
-                      title={sessionTitle(item.title)}
-                    >
-                      <span
-                        className={`status-dot ${item.status}`}
-                        role="img"
-                        aria-label={statusLabels[item.status]}
-                      />
-                      <span className="session-copy">
-                        <span className="session-title">{sessionTitle(item.title)}</span>
-                        <span className="session-meta">
-                          {item.model} ·{' '}
-                          {accountLabel(
-                            data.accounts.find((account) => account.id === item.account_profile_id),
-                          )}
+        {data?.sessions
+          .filter((s) => !s.parent_session_id)
+          .map((item) => (
+            <button
+              className={`session-button recent-chat ${sessionId === item.id ? 'selected' : ''}`}
+              key={item.id}
+              onClick={() => selectSession(item)}
+              title={sessionTitle(item.title)}
+            >
+              <Sparkles size={15} />
+              <span className="session-copy sidebar-label">
+                <span className="session-title">{sessionTitle(item.title)}</span>
+                <span className="session-meta">
+                  {item.chat_mode === 'team'
+                    ? 'Команда'
+                    : item.chat_mode === 'auto'
+                      ? 'Авторазбиение'
+                      : item.model}
+                </span>
+              </span>
+              <span className={`status-dot ${item.status}`} />
+            </button>
+          ))}
+        <div className="sidebar-heading sidebar-label">
+          <span>ПРОЕКТЫ</span>
+        </div>
+        {data?.workspaces
+          .filter((w) => w.id !== 'chat-scratch')
+          .map((project) => {
+            const current = workspace?.id === project.id;
+            const sessions = data.sessions.filter(
+              (session) => !session.parent_session_id && session.workspace_id === project.id,
+            );
+            return (
+              <section className="workspace-group" key={project.id}>
+                <button
+                  className={`project-button ${current ? 'current-project' : ''}`}
+                  aria-expanded={current}
+                  onClick={() => selectProject(project.id)}
+                  title={collapsed ? project.name : displayPath(project.root)}
+                >
+                  <Folder size={16} />
+                  <span className="sidebar-label project-name">{project.name}</span>
+                  {current && <span className="project-active-dot" aria-label="Открыт" />}
+                </button>
+                {current && !collapsed && !sessions.length && (
+                  <div className="project-sessions">
+                    {sessions.map((item) => (
+                      <button
+                        className={`session-button ${sessionId === item.id ? 'selected' : ''}`}
+                        key={item.id}
+                        onClick={() => selectSession(item)}
+                        title={sessionTitle(item.title)}
+                      >
+                        <span
+                          className={`status-dot ${item.status}`}
+                          role="img"
+                          aria-label={statusLabels[item.status]}
+                        />
+                        <span className="session-copy">
+                          <span className="session-title">{sessionTitle(item.title)}</span>
+                          <span className="session-meta">
+                            {item.model} ·{' '}
+                            {accountLabel(
+                              data.accounts.find(
+                                (account) => account.id === item.account_profile_id,
+                              ),
+                            )}
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  ))}
-                  {!sessions.length && (
-                    <button className="project-new" onClick={() => startSession(project.id)}>
-                      <Plus size={13} /> Начать сессию
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-          );
-        })}
+                      </button>
+                    ))}
+                    {!sessions.length && (
+                      <button className="project-new" onClick={() => startSession(project.id)}>
+                        <Plus size={13} /> Новый чат
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         <button
           className="project-button add-project"
           onClick={addProject}
@@ -159,7 +188,10 @@ export function Sidebar({
             <ShieldCheck size={18} />
             <strong>Локальный режим</strong>
           </div>
-          <p>Проекты и история сессий хранятся только на этом компьютере.</p>
+          <p>
+            История хранится на компьютере. Выбранный провайдер получает сообщения и рабочий
+            контекст.
+          </p>
           <button
             className="secondary-button"
             onClick={() => showSettings('О программе и обновления')}

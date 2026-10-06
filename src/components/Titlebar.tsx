@@ -70,7 +70,7 @@ export function Titlebar({
       <div className="titlebar-space" data-tauri-drag-region />
       <button className="global-search" onClick={search}>
         <Search size={15} />
-        <span>Поиск по проектам, сессиям, командам…</span>
+        <span>Поиск по проектам, чатам, командам…</span>
         <kbd>Ctrl + K</kbd>
       </button>
       <div className="titlebar-space" data-tauri-drag-region />

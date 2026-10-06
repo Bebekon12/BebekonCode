@@ -28,6 +28,31 @@ export interface Session {
   worktree_id: string | null;
   created_at: number;
   updated_at: number;
+  reasoning_effort: string | null;
+  tool_policy: string;
+  parent_session_id: string | null;
+  chat_mode: 'single' | 'team' | 'auto' | 'task';
+  role: string;
+  context_summary: string;
+}
+export interface ToolPolicy {
+  plugins?: string[] | null;
+  mcp_servers?: string[] | null;
+  skills?: string[] | null;
+}
+export interface AgentConfig {
+  provider: string;
+  account_profile_id: string;
+  model: string;
+  reasoning_effort: string | null;
+  permission_profile: string;
+  tools: ToolPolicy;
+  role: string;
+}
+export interface CreateChat {
+  workspace_id: string | null;
+  mode: 'single' | 'team' | 'auto';
+  agents: AgentConfig[];
 }
 export interface CreateSession {
   workspace_id: string;
@@ -39,6 +64,13 @@ export interface CreateSession {
 export type EventPayload =
   | { type: 'turn_started'; prompt: string }
   | { type: 'assistant_text_delta'; text: string }
+  | {
+      type: 'agent_configuration';
+      provider: string;
+      model: string;
+      account_profile_id: string;
+      reasoning_effort: string | null;
+    }
   | { type: 'tool_activity'; label: string; detail: string }
   | {
       type: 'approval_requested';
@@ -83,8 +115,11 @@ export interface ModelInfo {
   name: string;
   description: string;
   is_default: boolean;
+  reasoning_efforts?: string[];
+  default_reasoning_effort?: string | null;
 }
 export interface ExtensionItem {
+  id?: string;
   name: string;
   detail: string | null;
   enabled: boolean;
@@ -157,6 +192,9 @@ export interface ClientTransport {
   chooseFolder(): Promise<string | null>;
   addWorkspace(root: string): Promise<Workspace>;
   createSession(input: CreateSession): Promise<Session>;
+  createChat(input: CreateChat): Promise<Session>;
+  configureSession(sessionId: string, config: AgentConfig): Promise<Session>;
+  handoff(sessionId: string, config: AgentConfig): Promise<string>;
   sendMessage(sessionId: string, prompt: string): Promise<string>;
   cancel(sessionId: string): Promise<void>;
   events(sessionId: string, before?: number): Promise<AgentEvent[]>;

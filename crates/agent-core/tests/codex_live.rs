@@ -63,6 +63,21 @@ async fn sign_in_with_chatgpt_profile_and_documented_app_server_configuration() 
     .expect("save placeholder");
     let models = core.account_models(&account.id).await.expect("models");
     assert!(!models.is_empty(), "bundled model catalog expected");
+    assert!(
+        models
+            .iter()
+            .any(|model| !model.reasoning_efforts.is_empty()),
+        "reasoning levels must come from the official catalog"
+    );
+    let extensions = core
+        .account_extensions(&account.id)
+        .await
+        .expect("official extension inventory");
+    assert!(
+        extensions.errors.is_empty(),
+        "extension inventory failed: {:?}",
+        extensions.errors
+    );
 
     core.shutdown().await;
     siwc::save(&profile, &siwc::Credentials::default()).expect("clear");

@@ -15,6 +15,7 @@ pub struct TurnRequest {
     pub session: Session,
     /// The account bound to the session at creation. Providers must never substitute another.
     pub account: AccountProfile,
+    pub output_schema: Option<serde_json::Value>,
 }
 
 /// A provider engine. Everything beyond `info` and `run` has a conservative default, so a new
@@ -49,6 +50,8 @@ pub trait AgentProvider: Send + Sync {
                 id,
                 description: String::new(),
                 is_default: false,
+                reasoning_efforts: vec![],
+                default_reasoning_effort: None,
             })
             .collect())
     }
@@ -113,6 +116,10 @@ impl AgentProvider for MockProvider {
         events: mpsc::Sender<EventPayload>,
         cancel: CancellationToken,
     ) -> Result<()> {
+        if request.output_schema.is_some() {
+            let _=events.send(EventPayload::AssistantTextDelta { text:r#"{"tasks":[{"title":"Демо: анализ запроса","prompt":"Покажи демонстрационный ответ без инструментов","agent":0},{"title":"Демо: независимая проверка","prompt":"Покажи второй демонстрационный ответ без инструментов","agent":0}]}"#.into() }).await;
+            return Ok(());
+        }
         let activity = EventPayload::ToolActivity {
             label: "Демонстрация планирования".into(),
             detail: "Демонстрация действия. Команды не выполнялись, файлы проекта не читались."
@@ -122,7 +129,7 @@ impl AgentProvider for MockProvider {
             return Ok(());
         }
         let subject: String = request.prompt.chars().take(100).collect();
-        let response = format!("Это ответ локального демо на задачу: «{subject}».\n\nРабочая область поддерживает независимые сессии. Каждая сессия привязана к своему провайдеру, аккаунту и профилю разрешений, а её история хранится локально в SQLite.\n\nСимулятор демонстрирует потоковый вывод и остановку. Он не читает репозиторий, не запускает инструменты и не меняет файлы. Для настоящих задач программирования потребуется официальный адаптер провайдера.");
+        let response = format!("Это ответ локального демо на задачу: «{subject}».\n\nМодель, доступ и инструменты выбираются в чате. История хранится локально в SQLite.\n\nСимулятор демонстрирует потоковый вывод и остановку. Он не читает репозиторий, не запускает инструменты и не меняет файлы. Для настоящих задач подключите аккаунт ИИ в настройках.");
         for word in response.split_inclusive(' ') {
             tokio::select! {
                 biased;

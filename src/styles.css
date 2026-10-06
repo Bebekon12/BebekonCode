@@ -412,6 +412,231 @@ dd {
 .dialog-wide {
   width: 1000px;
 }
+/* The chat is the primary workspace; detailed agent activity is optional. */
+.chat-controls {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+.composer .chat-controls {
+  padding: 0;
+  border: 0;
+  width: 100%;
+}
+.chat-titlebar {
+  padding: 16px 18px;
+  margin: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.chat-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.chat-title strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.chat-title > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.chat-control-fields {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chat-control-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.chat-control-fields select {
+  font-size: 12px;
+  max-width: 220px;
+  min-height: 32px;
+}
+.chat-control-fields button {
+  min-height: 32px;
+}
+.chat-history-switch {
+  padding: 6px 16px;
+  text-align: right;
+  flex: none;
+}
+.chat-timeline .stepper {
+  padding: 8px 22px 18px;
+}
+.chat-timeline .step-marker {
+  display: none;
+}
+.chat-timeline .step::before {
+  display: none;
+}
+.chat-timeline .step {
+  padding-left: 0;
+  border: 0;
+  background: transparent;
+}
+.chat-timeline .step-head {
+  padding: 6px 0;
+}
+.chat-timeline .step-head .step-title > strong {
+  display: none;
+}
+.chat-timeline .step-body {
+  border: 0;
+  background: transparent;
+  padding: 6px 0 20px;
+}
+.chat-timeline .step-message {
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated);
+}
+.chat-timeline .step-message.agent {
+  background: transparent;
+}
+.chat-timeline .prose {
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.chat-activity-details {
+  margin: 8px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+.chat-activity-details > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.activity-detail summary {
+  cursor: pointer;
+}
+.activity-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 12px;
+}
+.chat-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 8px 0 20px;
+}
+.chat-mode {
+  flex-direction: column;
+  align-items: start;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  gap: 8px;
+}
+.chat-mode.selected {
+  border-color: var(--accent-solid);
+  background: var(--surface-selected);
+}
+.chat-mode > span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chat-agent-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.chat-agent-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+.chat-agent-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.agent-picker .field {
+  margin-bottom: 10px;
+}
+.agent-picker input,
+.agent-picker select {
+  width: 100%;
+  min-width: 0;
+}
+.agent-tools {
+  margin-top: 10px;
+}
+.agent-tools fieldset {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  margin: 10px 0;
+}
+.agent-tools legend {
+  color: var(--text-secondary);
+  padding: 0 6px;
+}
+.tool-choice {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  padding: 5px 0;
+}
+.agent-picker .tool-choice input {
+  width: 17px;
+  flex: none;
+  margin-top: 3px;
+}
+.tool-choice small {
+  display: block;
+  color: var(--text-muted);
+}
+.chat-branches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  max-height: 130px;
+  overflow: auto;
+  flex: none;
+  color: var(--text-muted);
+}
+.branch-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+.branch-chip > button {
+  padding: 5px 8px;
+  max-width: 330px;
+}
+.recent-chat {
+  width: 100%;
+  padding: 8px 10px;
+  justify-content: start;
+}
+@media (max-width: 780px) {
+  .chat-mode-grid {
+    grid-template-columns: 1fr;
+  }
+  .chat-mode {
+    padding: 10px;
+  }
+}
 .file-manager {
   display: flex;
   flex-direction: column;

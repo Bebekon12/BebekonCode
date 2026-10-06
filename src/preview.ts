@@ -136,9 +136,70 @@ export const preview: ClientTransport = {
       provider_session_id: null,
       created_at: now(),
       updated_at: now(),
+      reasoning_effort: null,
+      tool_policy: '{}',
+      parent_session_id: null,
+      chat_mode: 'single' as const,
+      role: '',
+      context_summary: '',
     };
     state.sessions.unshift(session);
     return structuredClone(session);
+  },
+  createChat: async (input) => {
+    let workspaceId = input.workspace_id;
+    if (!workspaceId) {
+      if (!state.workspaces.some((w) => w.id === 'chat-scratch'))
+        state.workspaces.push({
+          id: 'chat-scratch',
+          name: 'Без проекта',
+          root: 'Предпросмотр · файлы обычного чата',
+          created_at: now(),
+        });
+      workspaceId = 'chat-scratch';
+    }
+    let root = '';
+    for (const [index, agent] of input.agents.entries()) {
+      const session = await preview.createSession({
+        workspace_id: workspaceId,
+        provider: agent.provider,
+        account_profile_id: agent.account_profile_id,
+        model: agent.model,
+        permission_profile: index === 0 ? agent.permission_profile : 'read_only',
+      });
+      const stored = state.sessions.find((s) => s.id === session.id)!;
+      Object.assign(stored, {
+        reasoning_effort: agent.reasoning_effort,
+        tool_policy: JSON.stringify(agent.tools),
+        role: agent.role,
+        chat_mode: index === 0 ? input.mode : 'single',
+        parent_session_id: index === 0 ? null : root,
+      });
+      if (index === 0) root = session.id;
+      else stored.title = agent.role;
+    }
+    return structuredClone(state.sessions.find((s) => s.id === root)!);
+  },
+  configureSession: async (id, config) => {
+    const session = state.sessions.find((s) => s.id === id);
+    if (!session || session.status === 'running') throw new Error('Чат занят');
+    if (config.account_profile_id !== session.account_profile_id)
+      throw new Error('Используйте переход с контекстом');
+    Object.assign(session, {
+      ...config,
+      reasoning_effort: config.reasoning_effort,
+      tool_policy: JSON.stringify(config.tools),
+    });
+    return structuredClone(session);
+  },
+  handoff: async (id, config) => {
+    const session = state.sessions.find((s) => s.id === id);
+    if (!session || session.status === 'running') throw new Error('Чат занят');
+    Object.assign(session, config, {
+      tool_policy: JSON.stringify(config.tools),
+      context_summary: 'Предпросмотр: настоящая передача контекста работает в приложении.',
+    });
+    return crypto.randomUUID();
   },
   sendMessage: async (sessionId, prompt) => {
     const session = state.sessions.find((session) => session.id === sessionId);
@@ -273,15 +334,38 @@ export const preview: ClientTransport = {
         name: 'Модель предпросмотра',
         description: 'Имитация каталога Codex',
         is_default: true,
+        reasoning_efforts: ['low', 'medium', 'high'],
       },
     ];
   },
   accountExtensions: async () => ({
-    plugins: [{ name: 'Пример плагина', detail: '1.0.0', enabled: true, status: null }],
-    mcp_servers: [
-      { name: 'preview-mcp', detail: 'инструментов: 3', enabled: true, status: 'unsupported' },
+    plugins: [
+      {
+        id: 'preview-plugin',
+        name: 'Пример плагина',
+        detail: '1.0.0',
+        enabled: true,
+        status: null,
+      },
     ],
-    skills: [{ name: 'Пример навыка', detail: 'Предпросмотр', enabled: true, status: 'user' }],
+    mcp_servers: [
+      {
+        id: 'preview-mcp',
+        name: 'preview-mcp',
+        detail: 'инструментов: 3',
+        enabled: true,
+        status: 'unsupported',
+      },
+    ],
+    skills: [
+      {
+        id: 'preview-skill',
+        name: 'Пример навыка',
+        detail: 'Предпросмотр',
+        enabled: true,
+        status: 'user',
+      },
+    ],
     errors: [],
   }),
   subscribeAccounts: async (onEvent) => {

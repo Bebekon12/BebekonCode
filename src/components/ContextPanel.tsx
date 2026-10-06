@@ -191,7 +191,7 @@ export function ContextPanel({
       <section className="context-card">
         <div className="card-heading">
           <Play className="green" size={22} />
-          <h2>Текущая сессия</h2>
+          <h2>Текущий чат</h2>
           {session && (
             <span className={`step-pill ${session.status}`}>{statusLabels[session.status]}</span>
           )}
@@ -246,7 +246,7 @@ export function ContextPanel({
             </div>
           </>
         ) : (
-          <p className="muted">Создайте сессию или выберите её слева.</p>
+          <p className="muted">Создайте чат или выберите его слева.</p>
         )}
       </section>
       <section className="context-card">
@@ -341,7 +341,7 @@ export function ContextPanel({
         <dl>
           <dt>Владелец</dt>
           <dd>Вы, на этом компьютере</dd>
-          <dt>Разрешения сессии</dt>
+          <dt>Доступ агента</dt>
           <dd>{session ? permissionLabel(session.permission_profile) : '—'}</dd>
         </dl>
         <div className="access-sharing">

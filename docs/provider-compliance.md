@@ -58,7 +58,45 @@ Protocol facts (methods, fields, error codes) were taken from the schema generat
 CLI (`codex app-server generate-json-schema`, codex-cli 0.160.1). The app-server protocol is marked
 experimental; other CLI versions are flagged in the provider card.
 
-## Anthropic / Claude Code (next milestone, not yet implemented)
+## Chat controls and orchestration (0.4.0, checked 2026-10-06)
+
+Primary references: [Codex App Server](https://learn.chatgpt.com/docs/app-server) and
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+Protocol shapes are also checked against the official installed CLI 0.160.1 generated JSON schema.
+
+- `model/list` reports `supportedReasoningEfforts` and `defaultReasoningEffort`; no invented levels.
+- `turn/start` sets `model`, `effort`, `approvalPolicy=on-request` and the read-only/workspace-write
+  `sandboxPolicy` on every turn. Network remains disabled by default. Returning to default effort
+  sends that model's catalog default, rather than preserving the previous turn's override.
+- Provider processes receive only their own account token. Agent shell subprocesses use
+  `shell_environment_policy.inherit=core` and `ignore_default_excludes=false` so the inference
+  token is not inherited by agent commands.
+- `thread/start`/`thread/resume` accept thread-local `config`. MCP enablement and `skills.config`
+  are applied there. `disabledPluginIds` in the installed CLI's `TurnStartParams` restricts installed
+  plugins per thread. Account `config.toml` is never rewritten. Extension inventories are checked
+  before applying a selection; a failed/incomplete inventory blocks the selection.
+- Resume errors stop work, rather than silently creating an empty thread. Explicit handoff creates
+  a fresh thread with a summary produced by the source account. The binding changes only after
+  that succeeds. No automatic account changes or retry-on-another-account occur.
+- Planning/summarising runs in a fresh read-only thread with extensions disabled; approval requests
+  are denied. Task data is delimited as untrusted history, not inserted as developer instructions.
+- Automatic compaction uses Codex's model defaults (`model_auto_compact_token_limit` unset).
+  `contextCompaction` notifications are preserved as visible tool activity. No homemade token estimate.
+- Teams use up to three configured participants, two concurrent child contexts and one review round.
+  Auto plans use `outputSchema` and are validated before spawning at most four independent tasks.
+  Workers are read-only; the coordinator applies changes through its normal approval policy.
+  Outputs are bounded and errors stop synthesis; no fabricated worker success is substituted.
+- ChatGPT-plan hosted image generation remains unavailable. No claim that model selection or a role
+  gives a provider an unsupported tool.
+
+Anthropic remains unavailable until its official CLI adapter, approvals and Windows execution
+restrictions have been implemented and tested. Current
+[legal guidance](https://code.claude.com/docs/en/legal-and-compliance) permits hosting the unchanged
+CLI with the end user's own authentication, while prohibiting collecting/intermediating Claude
+credentials. The [subscription SDK notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+states that the June usage-credit change is paused; this does not authorize copying OAuth tokens.
+
+## Anthropic integration references
 
 - [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance): third-party apps may
   not offer claude.ai login of their own or route requests through Free/Pro/Max credentials on behalf
