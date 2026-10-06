@@ -40,11 +40,11 @@ fn relative(path: &str) -> Result<PathBuf> {
     let relative = Path::new(path);
     for component in relative.components() {
         let Component::Normal(name) = component else {
-            return Err(invalid("Use a project-relative path"));
+            return Err(invalid("Укажите путь относительно проекта"));
         };
         let name = name
             .to_str()
-            .ok_or_else(|| invalid("Unsupported filename encoding"))?;
+            .ok_or_else(|| invalid("Кодировка имени файла не поддерживается"))?;
         let stem = name
             .split('.')
             .next()
@@ -58,13 +58,15 @@ fn relative(path: &str) -> Result<PathBuf> {
                 && (stem.starts_with("COM") || stem.starts_with("LPT"))
                 && matches!(stem.as_bytes()[3], b'1'..=b'9'))
         {
-            return Err(invalid("Reserved or invalid filename"));
+            return Err(invalid("Зарезервированное или недопустимое имя файла"));
         }
     }
     // Check separators explicitly too: Unix builds must follow the Windows path contract.
     if path.contains('\\') || path.contains('\0') || path.split('/').any(|s| s == "." || s == "..")
     {
-        return Err(invalid("Use a project-relative path without traversal"));
+        return Err(invalid(
+            "Укажите путь внутри проекта без переходов за его пределы",
+        ));
     }
     Ok(relative.to_owned())
 }
@@ -72,7 +74,7 @@ fn relative(path: &str) -> Result<PathBuf> {
 pub fn resolve(root: &Path, path: &str, allow_new: bool) -> Result<PathBuf> {
     let root = root.canonicalize()?;
     if !root.is_dir() {
-        return Err(invalid("Project folder is unavailable"));
+        return Err(invalid("Папка проекта недоступна"));
     }
     let relative = relative(path)?;
     let mut target = root.clone();
@@ -82,7 +84,7 @@ pub fn resolve(root: &Path, path: &str, allow_new: bool) -> Result<PathBuf> {
         match fs::symlink_metadata(&target) {
             Ok(meta) if linked(&meta) => {
                 return Err(invalid(
-                    "Links and junctions cannot be opened or modified here",
+                    "Ссылки и точки соединения нельзя открывать или изменять в этом редакторе",
                 ))
             }
             Ok(_) => {}
@@ -98,7 +100,7 @@ pub fn resolve(root: &Path, path: &str, allow_new: bool) -> Result<PathBuf> {
     }
     let target = target.canonicalize()?;
     if !target.starts_with(&root) {
-        return Err(invalid("Path is outside this project"));
+        return Err(invalid("Путь находится за пределами проекта"));
     }
     Ok(target)
 }
@@ -109,14 +111,14 @@ pub fn list(root: &Path, path: &str) -> Result<Vec<Entry>> {
     for entry in fs::read_dir(directory)? {
         if entries.len() == MAX_ENTRIES {
             return Err(invalid(
-                "Folder has more than 5000 entries. Open it in Explorer.",
+                "В папке больше 5000 элементов. Откройте её в Проводнике.",
             ));
         }
         let entry = entry?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| invalid("Unsupported filename encoding"))?;
+            .map_err(|_| invalid("Кодировка имени файла не поддерживается"))?;
         let meta = fs::symlink_metadata(entry.path())?;
         let item = if path.is_empty() {
             name.clone()
@@ -144,15 +146,17 @@ pub fn read(root: &Path, path: &str) -> Result<String> {
     let file = fs::File::open(&path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() > MAX_TEXT {
-        return Err(invalid("Editor supports text files up to 2 MiB"));
+        return Err(invalid("Редактор поддерживает текстовые файлы до 2 МиБ"));
     }
     let mut bytes = Vec::new();
     file.take(MAX_TEXT + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_TEXT || bytes.contains(&0) {
-        return Err(invalid("Binary or oversized file. Open it in Explorer."));
+        return Err(invalid(
+            "Двоичный или слишком большой файл. Откройте его в Проводнике.",
+        ));
     }
     String::from_utf8(bytes).map_err(|_| {
-        invalid("Editor supports UTF-8 text. Open other encodings in an external editor.")
+        invalid("Редактор поддерживает UTF-8. Для других кодировок используйте внешний редактор.")
     })
 }
 
@@ -189,19 +193,21 @@ fn replace(source: &Path, destination: &Path) -> std::io::Result<()> {
 
 pub fn save(root: &Path, path: &str, expected: &str, content: &str) -> Result<()> {
     if content.len() as u64 > MAX_TEXT || content.contains('\0') {
-        return Err(invalid("Editor supports text up to 2 MiB"));
+        return Err(invalid("Редактор поддерживает текст до 2 МиБ"));
     }
     let target = resolve(root, path, false)?;
     let metadata = fs::metadata(&target)?;
     if metadata.permissions().readonly() {
-        return Err(invalid("This file is read-only"));
+        return Err(invalid("Файл доступен только для чтения"));
     }
     if read(root, path)? != expected {
-        return Err(invalid("File changed on disk. Reload it before saving."));
+        return Err(invalid(
+            "Файл изменился на диске. Перечитайте его перед сохранением.",
+        ));
     }
     let temp = target
         .parent()
-        .ok_or_else(|| invalid("Cannot edit the project root"))?
+        .ok_or_else(|| invalid("Нельзя редактировать корневую папку проекта"))?
         .join(format!(".bebekon-save-{}", uuid::Uuid::new_v4()));
     let result = (|| -> Result<()> {
         let mut file = fs::OpenOptions::new()
@@ -214,7 +220,9 @@ pub fn save(root: &Path, path: &str, expected: &str, content: &str) -> Result<()
         fs::set_permissions(&temp, metadata.permissions())?;
         // Recheck after preparing the temporary file, before replacing the original.
         if read(root, path)? != expected {
-            return Err(invalid("File changed on disk. Reload it before saving."));
+            return Err(invalid(
+                "Файл изменился на диске. Перечитайте его перед сохранением.",
+            ));
         }
         replace(&temp, &target)?;
         Ok(())
@@ -227,7 +235,7 @@ pub fn save(root: &Path, path: &str, expected: &str, content: &str) -> Result<()
 
 pub fn create(root: &Path, path: &str, directory: bool) -> Result<()> {
     if path.is_empty() {
-        return Err(invalid("Enter a filename"));
+        return Err(invalid("Укажите имя файла"));
     }
     let target = resolve(root, path, true)?;
     if directory {
@@ -243,12 +251,12 @@ pub fn create(root: &Path, path: &str, directory: bool) -> Result<()> {
 
 pub fn rename(root: &Path, path: &str, destination: &str) -> Result<()> {
     if path.is_empty() || destination.is_empty() {
-        return Err(invalid("Cannot rename the project root"));
+        return Err(invalid("Нельзя переименовать корневую папку проекта"));
     }
     let source = resolve(root, path, false)?;
     let destination = resolve(root, destination, true)?;
     if fs::symlink_metadata(&destination).is_ok() {
-        return Err(invalid("Destination already exists"));
+        return Err(invalid("Файл или папка с таким именем уже существует"));
     }
     fs::rename(source, destination)?;
     Ok(())
@@ -257,7 +265,7 @@ pub fn rename(root: &Path, path: &str, destination: &str) -> Result<()> {
 /// Never recursive. UI must explicitly confirm the displayed path before invoking this command.
 pub fn remove(root: &Path, path: &str) -> Result<()> {
     if path.is_empty() {
-        return Err(invalid("Cannot delete the project root"));
+        return Err(invalid("Нельзя удалить корневую папку проекта"));
     }
     let target = resolve(root, path, false)?;
     if target.is_dir() {

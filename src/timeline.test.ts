@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, mergeEvents } from './timeline';
+import { buildTimeline, filterTimeline, mergeEvents } from './timeline';
 import type { AgentEvent, EventPayload } from './contracts';
 const event = (sequence: number, run_id: string, payload: EventPayload): AgentEvent => ({
   sequence,
@@ -25,5 +25,57 @@ describe('event replay', () => {
       event(4, 'b', { type: 'provider_error', message: 'Limit reached' }),
     ]);
     expect(turns.map((turn) => turn.status)).toEqual(['stopped', 'failed']);
+  });
+});
+
+describe('timeline filters', () => {
+  const turns = buildTimeline([
+    event(1, 'a', { type: 'turn_started', prompt: 'Почини навигацию' }),
+    event(2, 'a', { type: 'assistant_text_delta', text: 'Готово' }),
+    event(3, 'b', { type: 'turn_started', prompt: 'Запусти тесты' }),
+    event(4, 'b', { type: 'tool_activity', label: 'Ran', detail: 'cargo test' }),
+  ]);
+  it('keeps only turns with tool activity in the tools view', () => {
+    expect(filterTimeline(turns, 'tools', '').map((turn) => turn.id)).toEqual(['b']);
+  });
+  it('searches case-insensitively in Cyrillic', () => {
+    expect(filterTimeline(turns, 'all', 'НАВИГАЦ').map((turn) => turn.id)).toEqual(['a']);
+  });
+  it('does not match text hidden by the active filter', () => {
+    expect(filterTimeline(turns, 'agent', 'навигац')).toEqual([]);
+    expect(filterTimeline(turns, 'agent', 'cargo')).toEqual([]);
+    expect(filterTimeline(turns, 'tools', 'cargo').map((turn) => turn.id)).toEqual(['b']);
+  });
+  it('records when each turn started', () => {
+    expect(turns[0]?.startedAt).toBe(0);
+  });
+});
+
+describe('approvals and provider errors', () => {
+  it('pairs approval requests with their resolution', () => {
+    const [turn] = buildTimeline([
+      event(1, 'a', { type: 'turn_started', prompt: 'Запусти тесты' }),
+      event(2, 'a', {
+        type: 'approval_requested',
+        id: 'x',
+        kind: 'command',
+        title: 'Codex хочет выполнить команду',
+        detail: 'npm test',
+        cwd: 'C:\app',
+        reason: null,
+      }),
+      event(3, 'a', { type: 'approval_resolved', id: 'x', decision: 'allow_once' }),
+    ]);
+    expect(turn?.approvals).toHaveLength(1);
+    expect(turn?.approvals[0]?.decision).toBe('allow_once');
+    expect(filterTimeline([turn!], 'tools', 'npm').map((item) => item.id)).toEqual(['a']);
+  });
+  it('keeps the provider error kind for manual recovery', () => {
+    const [turn] = buildTimeline([
+      event(1, 'a', { type: 'turn_started', prompt: 'x' }),
+      event(2, 'a', { type: 'provider_error', message: 'limit', kind: 'usage_limit' }),
+    ]);
+    expect(turn?.status).toBe('failed');
+    expect(turn?.errorKind).toBe('usage_limit');
   });
 });

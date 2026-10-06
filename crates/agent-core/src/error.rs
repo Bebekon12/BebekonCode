@@ -2,33 +2,40 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
-    #[error("Local storage operation failed")]
+    #[error("Не удалось выполнить операцию с локальным хранилищем")]
     Storage(#[from] sqlx::Error),
-    #[error("Database migration failed")]
+    #[error("Не удалось обновить структуру базы данных")]
     Migration(#[from] sqlx::migrate::MigrateError),
-    #[error("Invalid request: {0}")]
+    #[error("Некорректный запрос: {0}")]
     Invalid(String),
-    #[error("Record not found")]
+    #[error("Запись не найдена")]
     NotFound,
-    #[error("This session already has an active turn")]
+    #[error("В этой сессии уже выполняется задача")]
     Busy,
-    #[error("This provider is not integrated yet. Select the local demo provider.")]
+    #[error("Этот провайдер недоступен. Проверьте установку CLI в настройках провайдеров.")]
     ProviderUnavailable,
-    #[error("Filesystem operation failed")]
+    #[error("Не удалось выполнить операцию с файловой системой")]
     Io(#[from] std::io::Error),
-    #[error("Event encoding failed")]
+    #[error("Не удалось сохранить событие")]
     Json(#[from] serde_json::Error),
-    #[error("Git operation failed or Git is not installed")]
+    #[error("Ошибка операции Git или Git не установлен")]
     Git,
-    #[error("GitHub release check failed. Check your connection and try again.")]
+    #[error("Не удалось проверить обновления GitHub. Проверьте подключение и повторите попытку.")]
     UpdateNetwork,
-    #[error("GitHub API limit reached. Try again later.")]
+    #[error("Достигнут лимит запросов GitHub API. Повторите попытку позже.")]
     UpdateRateLimit,
-    #[error("GitHub returned invalid release metadata")]
+    #[error("GitHub вернул некорректные сведения о выпуске")]
     UpdateMetadata,
-    #[error("OS credential store is unavailable")]
+    #[error("Системное хранилище учётных данных недоступно")]
     CredentialStore,
-    #[error("Capability provider is not configured")]
+    #[error("Провайдер этой возможности не настроен")]
     CapabilityUnavailable,
+    /// A provider-reported failure, already redacted. `kind` lets the UI offer the right manual
+    /// recovery (for example choosing another account); the core never retries elsewhere.
+    #[error("{message}")]
+    Provider {
+        message: String,
+        kind: Option<String>,
+    },
 }
 pub type Result<T> = std::result::Result<T, CoreError>;

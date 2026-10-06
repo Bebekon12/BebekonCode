@@ -32,7 +32,7 @@ impl Default for DelegationLimits {
 impl DelegationLimits {
     pub fn validate(&self, depth: u8, calls: u16) -> Result<()> {
         if depth >= self.max_depth || calls >= self.max_calls_per_turn {
-            return Err(CoreError::Invalid("Delegation limit reached".into()));
+            return Err(CoreError::Invalid("Достигнут лимит делегирования".into()));
         }
         Ok(())
     }

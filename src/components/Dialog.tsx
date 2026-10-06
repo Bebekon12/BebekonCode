@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 export function Dialog({
   title,
@@ -12,6 +12,8 @@ export function Dialog({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Unique per dialog: stacked dialogs must not share a label.
+  const titleId = useId();
   const closeRef = useRef(close);
   closeRef.current = close;
   useEffect(() => {
@@ -58,12 +60,12 @@ export function Dialog({
         className={`dialog ${wide ? 'dialog-wide' : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="dialog-title"
+        aria-labelledby={titleId}
         ref={ref}
       >
         <div className="dialog-heading">
-          <h2 id="dialog-title">{title}</h2>
-          <button className="icon-button" aria-label="Close dialog" onClick={close}>
+          <h2 id={titleId}>{title}</h2>
+          <button className="icon-button" aria-label="Закрыть окно" onClick={close}>
             <X size={18} />
           </button>
         </div>

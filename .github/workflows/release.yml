@@ -39,7 +39,7 @@ jobs:
           releaseName: BebekonCode ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
           uploadUpdaterJson: false
       - name: Upload standalone Windows executable
         shell: pwsh

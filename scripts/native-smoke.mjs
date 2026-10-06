@@ -58,20 +58,26 @@ try {
   assert(page, 'Native packaged page unavailable');
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByText('BebekonCode', { exact: true }).waitFor();
+  await page.getByText('BebekonCode', { exact: true }).first().waitFor();
   // Seed the isolated profile through the real Tauri bridge, not an in-memory adapter.
   const workspace = await page.evaluate(
     (root) => window.__TAURI_INTERNALS__.invoke('add_workspace', { root }),
     project,
   );
   await page.reload();
-  await page.getByRole('button', { name: 'Project files', exact: true }).click();
+  await page.getByRole('button', { name: 'Файлы проекта', exact: true }).click();
   await page.getByRole('button', { name: 'hello.txt', exact: true }).click();
-  const editor = page.getByRole('textbox', { name: 'File content' });
+  const editor = page.getByRole('textbox', { name: 'Содержимое файла' });
   assert.equal(await editor.inputValue(), 'Hello from the real disk.\n');
   await editor.fill('Edited in the native desktop.\nснеговик');
+  // This drives a real desktop window; stray keystrokes from the user would land here.
+  assert.equal(
+    await editor.inputValue(),
+    'Edited in the native desktop.\nснеговик',
+    'Editor content changed before save: keyboard input reached the test window',
+  );
   await editor.press('Control+s');
-  await page.getByText('Saved to disk.', { exact: true }).waitFor();
+  await page.getByText('Сохранено на диске.', { exact: true }).waitFor();
   assert.equal(
     await fs.readFile(path.join(project, 'hello.txt'), 'utf8'),
     'Edited in the native desktop.\r\nснеговик',
@@ -81,33 +87,33 @@ try {
   await editor.fill('Must not overwrite external edits');
   await fs.writeFile(path.join(project, 'hello.txt'), 'External writer');
   await editor.press('Control+s');
-  await page.getByText(/File changed on disk/).waitFor();
+  await page.getByText(/Файл изменился на диске/).waitFor();
   assert.equal(await fs.readFile(path.join(project, 'hello.txt'), 'utf8'), 'External writer');
-  await page.getByRole('button', { name: 'Reload', exact: true }).click();
-  await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await page.getByRole('button', { name: 'Перечитать с диска', exact: true }).click();
+  await page.getByRole('button', { name: 'Не сохранять', exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector('[aria-label="File content"]')?.value === 'External writer',
+    () => document.querySelector('[aria-label="Содержимое файла"]')?.value === 'External writer',
   );
 
-  await page.getByRole('button', { name: 'New file', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Filename' }).fill('new.txt');
-  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await page.getByRole('button', { name: 'Новый файл', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Имя файла' }).fill('new.txt');
+  await page.getByRole('button', { name: 'Подтвердить', exact: true }).click();
   await page.getByRole('button', { name: 'new.txt', exact: true }).click();
-  await page.getByRole('button', { name: 'Rename / move', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Filename' }).fill('renamed.txt');
-  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await page.getByRole('button', { name: 'Переименовать / переместить', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Имя файла' }).fill('renamed.txt');
+  await page.getByRole('button', { name: 'Подтвердить', exact: true }).click();
   await page.getByRole('button', { name: 'renamed.txt', exact: true }).click();
   await fs.access(path.join(project, 'renamed.txt'));
-  await page.getByRole('button', { name: 'Delete…', exact: true }).click();
-  await page.getByRole('button', { name: 'Delete permanently', exact: true }).click();
+  await page.getByRole('button', { name: 'Удалить…', exact: true }).click();
+  await page.getByRole('button', { name: 'Удалить безвозвратно', exact: true }).click();
   await page.getByRole('button', { name: 'renamed.txt', exact: true }).waitFor({ state: 'hidden' });
   await assert.rejects(fs.access(path.join(project, 'renamed.txt')));
 
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Filename' }).fill('новая папка');
-  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await page.getByRole('button', { name: 'Новая папка', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Имя файла' }).fill('новая папка');
+  await page.getByRole('button', { name: 'Подтвердить', exact: true }).click();
   await page.getByRole('button', { name: 'новая папка', exact: true }).click();
-  await page.getByRole('button', { name: 'Parent folder', exact: true }).click();
+  await page.getByRole('button', { name: 'На уровень выше', exact: true }).click();
   assert((await fs.stat(path.join(project, 'новая папка'))).isDirectory());
   assert(await page.getByRole('button', { name: '.git', exact: true }).isDisabled());
   const escaped = await page.evaluate(async (workspaceId) => {
@@ -125,9 +131,9 @@ try {
   await editor.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'hello.txt', exact: true }).click();
   await editor.fill('Unsaved changes');
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await page.getByText(/Discard unsaved changes/).waitFor();
-  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
+  await page.getByText(/Не сохранять изменения в файле/).waitFor();
+  await page.getByRole('button', { name: 'Продолжить редактирование', exact: true }).click();
   assert.equal(await editor.inputValue(), 'Unsaved changes');
   const windowCloser = spawn(
     'powershell.exe',
@@ -135,18 +141,45 @@ try {
     { windowsHide: true, stdio: 'ignore' },
   );
   await new Promise((resolve) => windowCloser.once('exit', resolve));
-  await page.getByText(/Discard unsaved changes/).waitFor();
+  await page.getByText(/Не сохранять изменения в файле/).waitFor();
   assert(!exited, 'Native window closed despite unsaved edits');
-  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Продолжить редактирование', exact: true }).click();
   // Global shortcuts must not replace the editor and silently discard its buffer.
   await editor.press('Control+k');
   assert.equal(await editor.inputValue(), 'Unsaved changes');
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await page.getByRole('button', { name: 'Discard', exact: true }).click();
-  await page.getByRole('button', { name: 'Project files', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
+  await page.getByRole('button', { name: 'Не сохранять', exact: true }).click();
+  await page.getByRole('button', { name: 'Файлы проекта', exact: true }).click();
   await page.getByRole('button', { name: 'hello.txt', exact: true }).click();
   await fs.mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/native-files.png' });
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
+  // The published SQL seed/defaults stay unchanged; old built-in labels localize on display.
+  await page.evaluate(
+    (workspaceId) =>
+      window.__TAURI_INTERNALS__.invoke('create_session', {
+        input: {
+          workspace_id: workspaceId,
+          provider: 'mock',
+          account_profile_id: 'mock-local',
+          model: 'mock-stream-v1',
+          permission_profile: 'standard',
+        },
+      }),
+    workspace.id,
+  );
+  await page.reload();
+  // Legacy persisted title 'New session' is presented in Russian without a DB rewrite.
+  await page.locator('.session-title', { hasText: /^Новая сессия$/ }).waitFor();
+  await page.getByText('Ожидает задачи', { exact: true }).first().waitFor();
+  assert.equal(await page.getByText('Local demo', { exact: true }).count(), 0);
+  const composer = page.getByRole('textbox', { name: 'Сообщение агенту' });
+  await composer.fill('Проверка русского интерфейса');
+  await composer.press('Control+Enter');
+  await page.getByText('Это ответ локального демо', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Остановить агента', exact: true }).click();
+  await page.getByText(/^Остановлено вами/).waitFor();
+  await page.screenshot({ path: 'test-results/native-russian.png' });
   assert.deepEqual(errors, []);
   console.log(
     'PASS: native packaged WebView2, real IPC/disk CRUD, conflict handling, Unicode paths, traversal, dirty-navigation, native window close and branding',

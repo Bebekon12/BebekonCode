@@ -1,8 +1,12 @@
 # Security model
 
-The desktop is local-first: no analytics, crash upload, listener, cloud account or remote gateway.
-The only implemented external request is an explicit or opt-in GitHub release metadata check.
-The mock agent never reads files, executes commands, contacts a provider or changes a project.
+The desktop is local-first: no analytics, crash upload, cloud account or remote gateway.
+External requests: the opt-in GitHub release check, and for OpenAI accounts the documented Sign in
+with ChatGPT endpoints on `auth.openai.com` plus the requests the Codex CLI itself makes.
+The only listener is the one-shot OAuth callback on `127.0.0.1` during an explicit sign-in: it is
+bound before the browser opens, accepts only `/auth/callback`, validates `state` and closes after
+one callback or ten minutes. The mock agent never reads files, executes commands or contacts a
+provider.
 
 Tauri capabilities grant only core UI events/window behavior and the native open-folder dialog.
 There is no generic frontend shell, filesystem-plugin or HTTP API. Typed project-scoped file
@@ -14,8 +18,11 @@ requires a development build and `?preview=1`; its in-memory state is clearly la
 SQLite contains workspace/session/account metadata and user-visible timeline content, not
 provider credentials. Transcripts are private local data and are not encrypted at rest; OS user
 profile permissions and disk encryption protect them. Do not paste credentials into prompts.
-The native credential interface uses Windows Credential Manager; no IPC command exposes it.
-No real tokens are collected in this slice. Credential login/refresh remain future work.
+OpenAI tokens (access, refresh, ID) live in one record per account, encrypted with Windows DPAPI
+(user scope) and written atomically inside that account's profile folder. No IPC command returns
+them; they are only placed in the environment of that account's Codex process (`ACCESS_TOKEN`).
+Windows Credential Manager is not used for them because its entries are limited to 2.5 KB.
+Sign-out revokes the refresh token at OpenAI; removing an account deletes its folder.
 
 Logs use static allowlisted codes; prompt text, paths, provider JSON and raw errors are not logged.
 The central redaction writer masks sensitive formatted log records before output, including
@@ -42,7 +49,14 @@ there is no interpolation of filenames into a shell command or frontend command 
 Read-only Git calls use a directly resolved executable, no shell, clean allowlisted environment,
 null stdin/stderr, ten-second timeout and a two-MiB output limit. fsmonitor is disabled to avoid
 repository-controlled helper execution; external diff and textconv are disabled. No Git mutation
-commands are exposed. Full process-tree supervision is a prerequisite for real agent adapters.
+commands are exposed.
+
+Provider processes start from an absolute executable path with an allowlisted environment, so API
+keys or config overrides for other providers and accounts never reach them. Each provider process
+tree is placed in its own kill-on-close Job Object; stopping an account, closing the app or a crash
+ends the tree, including helpers the CLI starts itself (Codex runs `git` for its plugin catalog).
+Pipes are read on dedicated OS threads so an inherited handle cannot block shutdown. Processes that
+BebekonCode did not start are never touched.
 
 GitHub checks use HTTPS with no redirects, 12-second timeout, 256-KiB response limit and a six-hour
 in-process cache for non-forced checks. Preview/draft/malformed versions are rejected. Release

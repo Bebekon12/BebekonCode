@@ -40,7 +40,9 @@ pub fn resolve_inside(root: &Path, candidate: &Path) -> Result<PathBuf> {
     let root = root.canonicalize()?;
     let candidate = candidate.canonicalize()?;
     if !candidate.starts_with(&root) {
-        return Err(CoreError::Invalid("Path is outside the workspace".into()));
+        return Err(CoreError::Invalid(
+            "Путь находится за пределами рабочей области".into(),
+        ));
     }
     Ok(candidate)
 }

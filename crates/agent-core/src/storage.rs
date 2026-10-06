@@ -79,6 +79,14 @@ impl Storage {
             .await?;
         Ok(())
     }
+    pub async fn set_provider_session(&self, session: &str, provider_session: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET provider_session_id = ? WHERE id = ?")
+            .bind(provider_session)
+            .bind(session)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
     pub async fn append(
         &self,
         session: &str,

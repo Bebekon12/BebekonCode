@@ -81,7 +81,7 @@ async fn file_operation(
         }
     })
     .await
-    .map_err(|_| "File operation could not finish".to_string())?
+    .map_err(|_| "Не удалось завершить операцию с файлом".to_string())?
     .map_err(|error| error.to_string())
 }
 
@@ -110,17 +110,17 @@ async fn open_project(
                 .current_dir(root)
                 .creation_flags(0x00000010)
                 .spawn()
-                .map_err(|_| "Could not open PowerShell".to_string())?;
+                .map_err(|_| "Не удалось открыть PowerShell".to_string())?;
             Ok(())
         }
         #[cfg(not(windows))]
         {
-            Err("Terminal launcher currently supports Windows".into())
+            Err("Запуск терминала пока поддерживается только в Windows".into())
         }
     } else {
         app.opener()
             .open_path(root.to_string_lossy(), None::<&str>)
-            .map_err(|_| "Could not open Explorer".to_string())
+            .map_err(|_| "Не удалось открыть Проводник".to_string())
     }
 }
 
@@ -181,10 +181,125 @@ async fn session_events(
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
-fn refresh_providers(state: State<'_, AppState>) -> IpcResult<Vec<ProviderInfo>> {
+async fn refresh_providers(state: State<'_, AppState>) -> IpcResult<Vec<ProviderInfo>> {
     state
         .core
         .refresh_providers()
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn add_account(
+    provider: String,
+    label: String,
+    state: State<'_, AppState>,
+) -> IpcResult<AccountProfile> {
+    state
+        .core
+        .add_account(&provider, &label)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn rename_account(
+    account_id: String,
+    label: String,
+    state: State<'_, AppState>,
+) -> IpcResult<AccountProfile> {
+    state
+        .core
+        .rename_account(&account_id, &label)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn remove_account(account_id: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state
+        .core
+        .remove_account(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn account_status(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<AccountStatus> {
+    state
+        .core
+        .account_status(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+/// Starts the provider's own sign-in and opens its official page in the default browser.
+/// The app never sees or stores the resulting credentials.
+#[tauri::command]
+async fn account_login(
+    account_id: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> IpcResult<()> {
+    let login = state
+        .core
+        .account_login(&account_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    app.opener()
+        .open_url(login.url, None::<&str>)
+        .map_err(|_| "Не удалось открыть браузер для входа".to_string())
+}
+#[tauri::command]
+async fn account_logout(account_id: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state
+        .core
+        .account_logout(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn account_models(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<ModelInfo>> {
+    state
+        .core
+        .account_models(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn account_extensions(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Extensions> {
+    state
+        .core
+        .account_extensions(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+/// Opens the provider's official usage page. Only allowlisted provider URLs can be opened.
+#[tauri::command]
+fn open_usage(provider: String, app: tauri::AppHandle) -> IpcResult<()> {
+    let url = match provider.as_str() {
+        "openai" => agent_core::codex::siwc::USAGE_URL,
+        _ => return Err("У этого провайдера нет страницы использования".into()),
+    };
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "Не удалось открыть браузер".to_string())
+}
+#[tauri::command]
+async fn resolve_approval(
+    session_id: String,
+    approval_id: String,
+    decision: ApprovalDecision,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .resolve_approval(&session_id, &approval_id, decision)
+        .await
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
@@ -256,7 +371,7 @@ async fn open_releases(state: State<'_, AppState>, app: tauri::AppHandle) -> Ipc
         .unwrap_or_else(|| format!("https://github.com/{repo}/releases"));
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|_| "Could not open the release page".to_string())
+        .map_err(|_| "Не удалось открыть страницу выпуска".to_string())
 }
 
 fn main() {
@@ -267,6 +382,35 @@ fn main() {
         .with_ansi(false)
         .with_writer(agent_core::redaction::LogWriter::default)
         .init();
+
+    let mut context = tauri::generate_context!();
+    let profile = match requested_profile() {
+        Ok(profile) => profile,
+        Err(_) => {
+            tracing::error!(code = "desktop_profile_invalid");
+            std::process::exit(1);
+        }
+    };
+    if let Some(directory) = &profile {
+        use sha2::{Digest, Sha256};
+        // Single-instance/window state namespaces follow an explicitly selected local profile.
+        // The default application identifier and existing user data remain unchanged.
+        #[cfg(windows)]
+        let bytes: Vec<u8> = {
+            use std::os::windows::ffi::OsStrExt;
+            directory
+                .as_os_str()
+                .encode_wide()
+                .flat_map(u16::to_le_bytes)
+                .collect()
+        };
+        #[cfg(not(windows))]
+        let bytes = directory.as_os_str().as_encoded_bytes();
+        context
+            .config_mut()
+            .identifier
+            .push_str(&format!(".profile{:x}", Sha256::digest(bytes)));
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
@@ -276,23 +420,26 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            let mut directory = app.path().app_local_data_dir()?;
-            let mut arguments = std::env::args_os().skip(1);
-            while let Some(argument) = arguments.next() {
-                if argument == "--data-dir" {
-                    let path = arguments
-                        .next()
-                        .map(std::path::PathBuf::from)
-                        .ok_or("--data-dir requires an absolute folder")?;
-                    if !path.is_absolute() {
-                        return Err("--data-dir requires an absolute folder".into());
-                    }
-                    directory = path;
-                }
-            }
+        .setup(move |app| {
+            let directory = match profile {
+                Some(directory) => directory,
+                None => app.path().app_local_data_dir()?,
+            };
             std::fs::create_dir_all(&directory)?;
             let core = tauri::async_runtime::block_on(Core::open(&directory.join("workspace.db")))?;
+            let mut accounts = core.subscribe_accounts();
+            let account_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    match accounts.recv().await {
+                        Ok(event) => {
+                            let _ = account_handle.emit("account-event", event);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
             let mut events = core.subscribe();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -323,6 +470,16 @@ fn main() {
             cancel_session,
             session_events,
             refresh_providers,
+            add_account,
+            rename_account,
+            remove_account,
+            account_status,
+            account_login,
+            account_logout,
+            account_models,
+            account_extensions,
+            resolve_approval,
+            open_usage,
             save_settings,
             git_status,
             git_diff,
@@ -331,11 +488,13 @@ fn main() {
             file_operation,
             open_project
         ])
-        .build(tauri::generate_context!());
+        .build(context);
     match app {
         Ok(app) => app.run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                app.state::<AppState>().core.cancel_all();
+                // Stop provider processes cleanly; the kill-on-close job object is the backstop.
+                let core = std::sync::Arc::clone(&app.state::<AppState>().core);
+                tauri::async_runtime::block_on(core.shutdown());
             }
         }),
         Err(_) => {
@@ -343,4 +502,27 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn requested_profile() -> std::io::Result<Option<std::path::PathBuf>> {
+    let mut selected = None;
+    let mut arguments = std::env::args_os().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument != "--data-dir" {
+            continue;
+        }
+        let path = arguments
+            .next()
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Для --data-dir укажите абсолютный путь к папке",
+                )
+            })?;
+        std::fs::create_dir_all(&path)?;
+        selected = Some(path.canonicalize()?);
+    }
+    Ok(selected)
 }

@@ -1,6 +1,9 @@
 use crate::{
-    error::Result,
-    model::{EventPayload, ProviderInfo, Session},
+    error::{CoreError, Result},
+    model::{
+        AccountProfile, AccountStatus, ApprovalDecision, EventPayload, Extensions, LoginStart,
+        ModelInfo, ProviderInfo, Session,
+    },
 };
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -10,17 +13,82 @@ use tokio_util::sync::CancellationToken;
 pub struct TurnRequest {
     pub prompt: String,
     pub session: Session,
+    /// The account bound to the session at creation. Providers must never substitute another.
+    pub account: AccountProfile,
 }
 
+/// A provider engine. Everything beyond `info` and `run` has a conservative default, so a new
+/// provider can be added without touching the session manager and unsupported features stay
+/// visibly unavailable.
 #[async_trait]
 pub trait AgentProvider: Send + Sync {
     fn info(&self) -> ProviderInfo;
+
+    /// Re-detects the provider binary and version. Called on startup and on explicit refresh.
+    async fn refresh(&self) {}
+
     async fn run(
         &self,
         request: TurnRequest,
         events: mpsc::Sender<EventPayload>,
         cancel: CancellationToken,
     ) -> Result<()>;
+
+    /// Whether accounts of this provider are created by the user and need sign-in.
+    fn manages_accounts(&self) -> bool {
+        false
+    }
+
+    async fn models(&self, _account: &AccountProfile) -> Result<Vec<ModelInfo>> {
+        Ok(self
+            .info()
+            .models
+            .into_iter()
+            .map(|id| ModelInfo {
+                name: id.clone(),
+                id,
+                description: String::new(),
+                is_default: false,
+            })
+            .collect())
+    }
+
+    async fn account_status(&self, account: &AccountProfile) -> Result<AccountStatus> {
+        Ok(AccountStatus {
+            account_id: account.id.clone(),
+            state: "not_required".into(),
+            checked_at: crate::model::now(),
+            ..AccountStatus::default()
+        })
+    }
+
+    async fn login(&self, _account: &AccountProfile) -> Result<LoginStart> {
+        Err(CoreError::Invalid(
+            "Этот провайдер не поддерживает вход".into(),
+        ))
+    }
+
+    async fn logout(&self, _account: &AccountProfile) -> Result<()> {
+        Ok(())
+    }
+
+    async fn extensions(&self, _account: &AccountProfile) -> Result<Extensions> {
+        Ok(Extensions::default())
+    }
+
+    async fn resolve_approval(
+        &self,
+        _session_id: &str,
+        _approval_id: &str,
+        _decision: ApprovalDecision,
+    ) -> Result<()> {
+        Err(CoreError::NotFound)
+    }
+
+    /// Stops background processes owned for this account, e.g. before the account is removed.
+    async fn release_account(&self, _account: &AccountProfile) {}
+
+    async fn shutdown(&self) {}
 }
 
 pub struct MockProvider;
@@ -30,10 +98,12 @@ impl AgentProvider for MockProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: "mock".into(),
-            name: "Local demo".into(),
+            name: "Локальное демо".into(),
             available: true,
             detected_path: None,
-            detail: "Deterministic local simulator. No AI requests, tools, or file changes.".into(),
+            detail:
+                "Локальный симулятор. Без запросов к ИИ, запуска инструментов и изменений файлов."
+                    .into(),
             models: vec!["mock-stream-v1".into()],
         }
     }
@@ -44,15 +114,15 @@ impl AgentProvider for MockProvider {
         cancel: CancellationToken,
     ) -> Result<()> {
         let activity = EventPayload::ToolActivity {
-            label: "Simulated planning step".into(),
-            detail: "Demo activity only. No commands were executed and no project files were read."
+            label: "Демонстрация планирования".into(),
+            detail: "Демонстрация действия. Команды не выполнялись, файлы проекта не читались."
                 .into(),
         };
         if events.send(activity).await.is_err() {
             return Ok(());
         }
         let subject: String = request.prompt.chars().take(100).collect();
-        let response = format!("This is a local demo response to: “{subject}”.\n\nThe workspace is ready for independent agent sessions. Each session keeps its provider, account and permission profile, and its timeline is stored locally in SQLite.\n\nThis simulator demonstrates streaming and cancellation. It does not inspect your repository, execute tools or modify files. Connect an official provider adapter in a later milestone to perform real coding tasks.");
+        let response = format!("Это ответ локального демо на задачу: «{subject}».\n\nРабочая область поддерживает независимые сессии. Каждая сессия привязана к своему провайдеру, аккаунту и профилю разрешений, а её история хранится локально в SQLite.\n\nСимулятор демонстрирует потоковый вывод и остановку. Он не читает репозиторий, не запускает инструменты и не меняет файлы. Для настоящих задач программирования потребуется официальный адаптер провайдера.");
         for word in response.split_inclusive(' ') {
             tokio::select! {
                 biased;
@@ -72,26 +142,21 @@ impl AgentProvider for MockProvider {
 
 pub fn detect_providers() -> Vec<ProviderInfo> {
     let mut providers = vec![MockProvider.info()];
-    for (id, name, binary) in [
-        ("openai", "OpenAI / Codex", "codex"),
-        ("anthropic", "Anthropic / Claude Code", "claude"),
-    ] {
-        let path = which::which(binary)
-            .ok()
-            .map(|path| path.to_string_lossy().into_owned());
-        let detail = if path.is_some() {
-            "CLI detected. Official adapter and isolated sign-in are not integrated yet."
-        } else {
-            "CLI not detected. Install the official CLI; integration is planned for the next milestone."
-        };
-        providers.push(ProviderInfo {
-            id: id.into(),
-            name: name.into(),
-            available: false,
-            detected_path: path,
-            detail: detail.into(),
-            models: vec![],
-        });
-    }
+    let path = which::which("claude")
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    let detail = if path.is_some() {
+        "Claude Code найден. Адаптер с изолированными профилями — следующий этап."
+    } else {
+        "Claude Code не найден. Установите официальный CLI."
+    };
+    providers.push(ProviderInfo {
+        id: "anthropic".into(),
+        name: "Anthropic / Claude Code".into(),
+        available: false,
+        detected_path: path,
+        detail: detail.into(),
+        models: vec![],
+    });
     providers
 }

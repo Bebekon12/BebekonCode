@@ -4,8 +4,9 @@ use crate::{CoreError, Result};
 pub struct CredentialStore;
 impl CredentialStore {
     fn entry(profile: &str) -> Result<keyring::Entry> {
-        uuid::Uuid::parse_str(profile)
-            .map_err(|_| CoreError::Invalid("Invalid account profile ID".into()))?;
+        uuid::Uuid::parse_str(profile).map_err(|_| {
+            CoreError::Invalid("Недопустимый идентификатор профиля аккаунта".into())
+        })?;
         keyring::Entry::new("com.bebekon.agent-workspace", profile)
             .map_err(|_| CoreError::CredentialStore)
     }

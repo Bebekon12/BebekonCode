@@ -96,7 +96,7 @@ async fn unavailable_provider_and_wrong_account_are_rejected() {
         .clone();
     let mut input = CreateSession {
         workspace_id,
-        provider: "openai".into(),
+        provider: "gemini".into(),
         account_profile_id: "mock-local".into(),
         model: "mock-stream-v1".into(),
         permission_profile: "standard".into(),
@@ -139,4 +139,41 @@ async fn database_reopen_recovers_incomplete_turn_without_replay() {
         core.storage.events(&id, None).await.expect("events").len(),
         1
     );
+}
+
+#[tokio::test]
+async fn account_profiles_are_isolated_and_removal_is_guarded() {
+    let (temp, core, _) = fixture().await;
+    let first = core
+        .add_account("openai", "  Личный  ")
+        .await
+        .expect("first account");
+    let second = core
+        .add_account("openai", "Рабочий")
+        .await
+        .expect("second account");
+    assert_eq!(first.label, "Личный");
+    assert_eq!(first.auth_status, "signed_out");
+    let (Some(first_dir), Some(second_dir)) = (&first.config_dir, &second.config_dir) else {
+        panic!("profiles need their own directories");
+    };
+    assert_ne!(first_dir, second_dir);
+    for directory in [first_dir, second_dir] {
+        let directory = std::path::Path::new(directory);
+        assert!(directory.is_dir());
+        assert!(directory.starts_with(temp.path().join("providers").join("openai")));
+    }
+    assert!(core.add_account("mock", "Демо").await.is_err());
+    assert!(core.add_account("openai", "   ").await.is_err());
+    let renamed = core
+        .rename_account(&second.id, "Второй")
+        .await
+        .expect("rename");
+    assert_eq!(renamed.label, "Второй");
+    core.remove_account(&second.id).await.expect("remove");
+    assert!(!std::path::Path::new(second_dir).exists());
+    assert!(core.remove_account("mock-local").await.is_err());
+    let accounts = core.snapshot().await.expect("snapshot").accounts;
+    assert!(accounts.iter().any(|account| account.id == first.id));
+    assert!(!accounts.iter().any(|account| account.id == second.id));
 }

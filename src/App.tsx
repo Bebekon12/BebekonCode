@@ -1,42 +1,39 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ArrowUp,
-  ArrowUpRight,
-  ChevronDown,
   ChevronRight,
-  Command,
-  Folder,
-  FolderOpen,
   FolderPlus,
-  GitBranch,
-  Layers3,
-  MoreHorizontal,
   PanelRightClose,
   Plus,
-  Search,
   Settings2,
   ShieldCheck,
   Sparkles,
   Square,
-  Terminal,
   X,
 } from 'lucide-react';
-import type {
-  AgentEvent,
-  ClientTransport,
-  CreateSession,
-  ReleaseCheck,
-  Session,
-  Snapshot,
-} from './contracts';
+import type { AgentEvent, ClientTransport, ReleaseCheck, Session, Snapshot } from './contracts';
 import { browserPreview, getTransport } from './transport';
 import { eventStatus, mergeEvents } from './timeline';
-import { Dialog } from './components/Dialog';
+import { usePreference } from './preferences';
+import { useAccountState } from './accounts';
 import { Timeline } from './components/Timeline';
 import { ContextPanel } from './components/ContextPanel';
 import { Settings } from './components/Settings';
 import { FileManager } from './components/FileManager';
-import product from '../product.json';
+import { Titlebar } from './components/Titlebar';
+import { Sidebar } from './components/Sidebar';
+import { Composer } from './components/Composer';
+import { WelcomeHero } from './components/WelcomeHero';
+import { NewSession } from './components/NewSessionDialog';
+import { CommandPalette } from './components/CommandPalette';
+import { PlanWelcome } from './components/PlanWelcome';
+import {
+  accountLabel,
+  counted,
+  errorText,
+  permissionLabel,
+  sessionTitle,
+  statusLabels,
+} from './locale';
 
 export function App() {
   const [client, setClient] = useState<ClientTransport | null>(null);
@@ -49,7 +46,16 @@ export function App() {
   const browsingHistory = useRef(historyPage);
   browsingHistory.current = historyPage;
   const [dialog, setDialog] = useState<'new' | 'settings' | 'commands' | 'files' | null>(null);
-  const [context, setContext] = useState(true);
+  const [context, setContext] = useState(window.innerWidth > 1100);
+  const [settingsTab, setSettingsTab] = useState('Основные');
+  const [newSessionProvider, setNewSessionProvider] = useState<string>();
+  const showSettings = (tab = 'Основные') => {
+    setSettingsTab(tab);
+    setDialog('settings');
+  };
+  const openTerminal = () => {
+    if (client && workspace) void action(() => client.openProject(workspace.id, true));
+  };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [release, setRelease] = useState<ReleaseCheck | null>(null);
@@ -65,6 +71,16 @@ export function App() {
   const account = data?.accounts.find((account) => account.id === session?.account_profile_id);
   const draft = drafts[sessionId] ?? '';
   const running = session?.status === 'running';
+  const homeSessions =
+    data?.sessions.filter((item) => !workspace || item.workspace_id === workspace.id) ?? [];
+  const [tabIds, setTabIds] = usePreference<string[]>('project-tabs', []);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePreference('sidebar-collapsed', false);
+  const [heroHidden, setHeroHidden] = usePreference('hero-hidden', false);
+
+  // The open project always has a tab; closing a tab never removes the project itself.
+  useEffect(() => {
+    if (workspace && !tabIds.includes(workspace.id)) setTabIds((ids) => [...ids, workspace.id]);
+  }, [workspace, tabIds, setTabIds]);
 
   useEffect(() => {
     let alive = true;
@@ -150,7 +166,7 @@ export function App() {
           if (alive) setRelease(check);
         }
       } catch (error) {
-        if (alive) setError(String(error));
+        if (alive) setError(errorText(error));
       }
     })();
     return () => {
@@ -171,7 +187,7 @@ export function App() {
         if (alive) setEvents((current) => mergeEvents(current, history));
       })
       .catch((error) => {
-        if (alive) setError(String(error));
+        if (alive) setError(errorText(error));
       });
     return () => {
       alive = false;
@@ -205,13 +221,47 @@ export function App() {
     });
   }, [events, sessionId, historyPage]);
 
+  // Accounts live in the core; the UI re-reads them after account changes or sign-in events.
+  const reloadAccounts = useCallback(() => {
+    if (!client) return;
+    void client
+      .snapshot()
+      .then((snapshot) =>
+        setData((current) =>
+          current
+            ? { ...current, accounts: snapshot.accounts, providers: snapshot.providers }
+            : snapshot,
+        ),
+      )
+      .catch((error) => setError(errorText(error)));
+  }, [client]);
+  const accountState = useAccountState(client, data?.accounts ?? [], reloadAccounts);
+  // First successful ChatGPT-plan sign-in per account gets a one-time confirmation.
+  const [welcomed, setWelcomed] = usePreference<string[]>('plan-welcomed', []);
+  const [planWelcome, setPlanWelcome] = useState('');
+  useEffect(() => {
+    for (const account of data?.accounts ?? []) {
+      const status = accountState.statuses[account.id];
+      if (
+        account.provider === 'openai' &&
+        status?.state === 'signed_in' &&
+        status.plan_usage_enabled &&
+        !welcomed.includes(account.id)
+      ) {
+        setWelcomed((ids) => [...ids, account.id]);
+        setPlanWelcome(account.id);
+        break;
+      }
+    }
+  }, [data?.accounts, accountState.statuses, welcomed, setWelcomed]);
+
   const action = async (work: () => Promise<void>) => {
     setBusy(true);
     setError('');
     try {
       await work();
     } catch (error) {
-      setError(String(error));
+      setError(errorText(error));
     } finally {
       setBusy(false);
     }
@@ -268,175 +318,99 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, [dialog]);
 
+  const providerName = (id?: string) =>
+    data?.providers.find((provider) => provider.id === id)?.name ?? id ?? '';
+  const tabs = tabIds.flatMap((id) => data?.workspaces.find((item) => item.id === id) ?? []);
+  const selectProject = (id: string) => {
+    setProjectId(id);
+    setSessionId(data?.sessions.find((session) => session.workspace_id === id)?.id ?? '');
+  };
+  const closeTab = (id: string) => {
+    const index = tabs.findIndex((tab) => tab.id === id);
+    const remaining = tabs.filter((tab) => tab.id !== id);
+    setTabIds(remaining.map((tab) => tab.id));
+    if (workspace?.id !== id) return;
+    const next = remaining[Math.min(index, remaining.length - 1)];
+    if (next) selectProject(next.id);
+    else {
+      setProjectId('');
+      setSessionId('');
+    }
+  };
+  const cancelCurrent = () => client && session && void action(() => client.cancel(session.id));
+  const hero = !heroHidden && (
+    <WelcomeHero
+      start={data?.workspaces.length ? newSession : addProject}
+      providers={() => showSettings('Провайдеры')}
+      hide={() => setHeroHidden(true)}
+      disabled={busy || !client}
+    />
+  );
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar" aria-label="Projects and sessions">
-        <div className="brand">
-          <img src="/brand/snowman.png" alt="" />
-          <span>{product.name}</span>
-          <span className="version-label">EARLY ACCESS</span>
-        </div>
-        <button className="command-button" onClick={() => setDialog('commands')} disabled={!data}>
-          <Search size={15} />
-          <span>Search & commands</span>
-          <kbd>Ctrl K</kbd>
-        </button>
-        <div className="sidebar-heading">
-          <span>WORKSPACES</span>
-          <button
-            className="icon-button"
-            aria-label="Add project"
-            onClick={addProject}
-            disabled={busy || !client}
-          >
-            <Plus size={15} />
-          </button>
-        </div>
-        <div className="workspace-list">
-          {data?.workspaces.map((project) => (
-            <section className="workspace-group" key={project.id}>
-              <button
-                className={`project-button ${workspace?.id === project.id ? 'current-project' : ''}`}
-                onClick={() => {
-                  setProjectId(project.id);
-                  setSessionId(
-                    data.sessions.find((session) => session.workspace_id === project.id)?.id ?? '',
-                  );
-                }}
-              >
-                <ChevronDown size={13} />
-                <Folder size={15} />
-                <span>{project.name}</span>
-              </button>
-              {data.sessions
-                .filter((session) => session.workspace_id === project.id)
-                .map((item) => (
-                  <button
-                    className={`session-button ${sessionId === item.id ? 'selected' : ''}`}
-                    key={item.id}
-                    onClick={() => selectSession(item)}
-                    title={item.title}
-                  >
-                    <span className={`status-dot ${item.status}`} aria-label={item.status} />
-                    <span className="session-copy">
-                      <span className="session-title">{item.title}</span>
-                      <span className="session-meta">
-                        Demo ·{' '}
-                        {data.accounts.find((account) => account.id === item.account_profile_id)
-                          ?.label ?? item.account_profile_id}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              {!data.sessions.some((session) => session.workspace_id === project.id) && (
-                <button
-                  className="project-new"
-                  onClick={() => {
-                    setProjectId(project.id);
-                    setDialog('new');
-                  }}
-                >
-                  <Plus size={13} /> Start a session
-                </button>
-              )}
-            </section>
-          ))}
-          {data && !data.workspaces.length && (
-            <div className="sidebar-empty">
-              Your projects live here.
-              <br />
-              Add a folder to get started.
-            </div>
-          )}
-        </div>
-        <div className="sidebar-bottom">
-          <button
-            className="sidebar-action"
-            disabled={!client || !workspace}
-            onClick={() => setDialog('files')}
-          >
-            <FolderOpen size={16} /> Project files
-          </button>
-          <button className="sidebar-action" onClick={newSession} disabled={busy || !client}>
-            <Plus size={16} /> New session <kbd>Ctrl N</kbd>
-          </button>
-          <button className="sidebar-action" onClick={() => setDialog('settings')} disabled={!data}>
-            <Settings2 size={16} /> Settings{' '}
-            {release?.available && <span className="update-dot" aria-label="Update available" />}
-          </button>
-          <div className="local-status">
-            <span className="status-dot completed" /> Local core{' '}
-            <span>{browserPreview ? 'Preview' : 'Desktop'}</span>
-          </div>
-        </div>
-      </aside>
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <Titlebar
+        tabs={tabs}
+        activeId={workspace?.id}
+        selectTab={selectProject}
+        closeTab={closeTab}
+        addProject={client && !busy ? addProject : undefined}
+        search={() => data && setDialog('commands')}
+        toggleContext={() => setContext((value) => !value)}
+        onError={(error) => setError(errorText(error))}
+      />
+      <Sidebar
+        data={data}
+        workspace={workspace}
+        sessionId={sessionId}
+        home={!session}
+        collapsed={sidebarCollapsed}
+        disabled={busy || !client}
+        toggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        newSession={newSession}
+        addProject={addProject}
+        goHome={() => setSessionId('')}
+        showSettings={showSettings}
+        openFiles={() => client && workspace && setDialog('files')}
+        selectProject={selectProject}
+        selectSession={selectSession}
+        startSession={(id) => {
+          setProjectId(id);
+          setDialog('new');
+        }}
+        preview={browserPreview}
+      />
 
       <main className="main-workspace">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <Folder size={16} />
-            <span>{workspace?.name ?? 'Workspace'}</span>
-            <ChevronRight size={13} />
-            <span className="muted">{session ? 'Agent session' : 'Overview'}</span>
-          </div>
-          <div className="topbar-actions">
-            <span className="local-badge">
-              <ShieldCheck size={13} /> Local-first
-            </span>
-            <button
-              className="icon-button"
-              aria-label="Toggle context panel"
-              onClick={() => setContext((value) => !value)}
-            >
-              <PanelRightClose size={17} />
-            </button>
-          </div>
-        </header>
         {browserPreview && (
           <div className="preview-banner">
-            Development browser preview · data stays in memory · filesystem and release checks
-            require the desktop app
+            Предпросмотр для разработки · данные хранятся в памяти · файлы и обновления доступны в
+            приложении
           </div>
         )}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
-            <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
+            <button
+              className="icon-button"
+              aria-label="Закрыть сообщение об ошибке"
+              onClick={() => setError('')}
+            >
               <X size={15} />
             </button>
           </div>
         )}
         {release?.available && (
           <button className="release-banner" onClick={() => setDialog('settings')}>
-            Version {release.latest_version} is available · view release notes{' '}
-            <ArrowUpRight size={14} />
+            Доступна версия {release.latest_version} · посмотреть изменения{' '}
+            <ChevronRight size={14} />
           </button>
         )}
         <div className="workspace-content">
           <div className="conversation-column">
             {session ? (
               <>
-                <div className="session-header">
-                  <div>
-                    <div className="eyebrow">AGENT SESSION</div>
-                    <h1>{session.title}</h1>
-                    <div className="session-subtitle">
-                      <span className={`status-dot ${session.status}`} />
-                      <span>{session.status}</span>
-                      <span className="separator">/</span>
-                      <span>Local demo</span>
-                      <span className="separator">/</span>
-                      <span>{account?.label}</span>
-                    </div>
-                  </div>
-                  <button
-                    className="icon-button"
-                    aria-label="Session details"
-                    onClick={() => setContext(true)}
-                  >
-                    <MoreHorizontal size={20} />
-                  </button>
-                </div>
+                {hero && <div className="hero-slot in-session">{hero}</div>}
                 {historyPage && (
                   <button
                     className="history-banner"
@@ -452,11 +426,38 @@ export function App() {
                       })
                     }
                   >
-                    Viewing earlier activity · back to latest
+                    Просмотр истории · вернуться к последним событиям
                   </button>
                 )}
                 <Timeline
                   session={session}
+                  providerName={providerName(session.provider)}
+                  account={accountLabel(account)}
+                  permissions={permissionLabel(session.permission_profile)}
+                  openFiles={() => setDialog('files')}
+                  openTerminal={openTerminal}
+                  cancel={cancelCurrent}
+                  resolveApproval={(approvalId, decision) =>
+                    client
+                      ? client.resolveApproval(session.id, approvalId, decision)
+                      : Promise.resolve()
+                  }
+                  retry={(prompt) => {
+                    if (client)
+                      void action(async () => {
+                        await client.sendMessage(session.id, prompt);
+                      });
+                  }}
+                  manageUsage={
+                    session.provider === 'openai' && client
+                      ? () => void action(() => client.openUsage('openai'))
+                      : undefined
+                  }
+                  chooseAnotherAccount={() => {
+                    setNewSessionProvider(session.provider);
+                    setProjectId(session.workspace_id);
+                    setDialog('new');
+                  }}
                   events={events.filter((event) => event.session_id === session.id)}
                   loadOlder={() => {
                     if (!client || !events.length) return;
@@ -470,134 +471,94 @@ export function App() {
                     });
                   }}
                 />
-                <div className="composer-region">
-                  <div className={`composer ${running ? 'composer-running' : ''}`}>
-                    <textarea
-                      ref={composer}
-                      aria-label="Message to agent"
-                      placeholder="Describe a task, ask a question, or explore an idea…"
-                      value={draft}
-                      maxLength={16000}
-                      disabled={running}
-                      onChange={(event) =>
-                        setDrafts((current) => ({ ...current, [session.id]: event.target.value }))
-                      }
-                      onKeyDown={(event) => {
-                        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                          event.preventDefault();
-                          send();
-                        }
-                      }}
-                    />
-                    <div className="composer-toolbar">
-                      <div className="composer-controls">
-                        <span className="control-pill">
-                          <Sparkles size={13} /> Local demo
-                        </span>
-                        <span className="control-pill">mock-stream-v1</span>
-                        <span className="control-pill account-pill">{account?.label}</span>
-                        <span className="permission-pill">
-                          <ShieldCheck size={13} />
-                          {session.permission_profile === 'read_only' ? 'Read only' : 'Standard'}
-                        </span>
-                      </div>
-                      {running ? (
-                        <button
-                          className="send-button stop-button"
-                          aria-label="Stop agent"
-                          onClick={() => client && void action(() => client.cancel(session.id))}
-                        >
-                          <Square size={14} />
-                        </button>
-                      ) : (
-                        <button
-                          className="send-button"
-                          aria-label="Send message"
-                          disabled={!draft.trim() || busy}
-                          onClick={send}
-                        >
-                          <ArrowUp size={17} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="composer-caption">
-                    <span>Local simulator · no project files are read or modified</span>
-                    <span>
-                      <kbd>Ctrl ↵</kbd> to send
-                    </span>
-                  </div>
-                </div>
+                <Composer
+                  ref={composer}
+                  draft={draft}
+                  setDraft={(value) =>
+                    setDrafts((current) => ({ ...current, [session.id]: value }))
+                  }
+                  running={running}
+                  busy={busy}
+                  send={send}
+                  cancel={cancelCurrent}
+                  providerName={providerName(session.provider)}
+                  model={session.model}
+                  account={accountLabel(account)}
+                  permissions={permissionLabel(session.permission_profile)}
+                  demo={session.provider === 'mock'}
+                  manageUsage={
+                    session.provider === 'openai' && client
+                      ? () => void action(() => client.openUsage('openai'))
+                      : undefined
+                  }
+                />
               </>
             ) : (
-              <div className="welcome">
-                <div className="welcome-top">
-                  <span className="eyebrow">YOUR DEVELOPMENT WORKSPACE</span>
-                  <span className="welcome-version">01 / GET STARTED</span>
+              <div className="dashboard">
+                {hero}
+                <div className="dashboard-heading">
+                  <h2>{workspace ? `Сессии · ${workspace.name}` : 'Ваши сессии'}</h2>
+                  <span>{counted(homeSessions.length, ['сессия', 'сессии', 'сессий'])}</span>
                 </div>
-                <div className="welcome-main">
-                  <div className="welcome-mark">
-                    <Layers3 size={30} />
+                {homeSessions.map((item) => (
+                  <button
+                    className="dashboard-session"
+                    key={item.id}
+                    onClick={() => selectSession(item)}
+                  >
+                    <span className="dashboard-session-icon">
+                      <Sparkles size={19} />
+                    </span>
+                    <span>
+                      <strong>{sessionTitle(item.title)}</strong>
+                      <small>
+                        {data?.workspaces.find((project) => project.id === item.workspace_id)?.name}{' '}
+                        · {providerName(item.provider)} · {item.model}
+                      </small>
+                    </span>
+                    <span className={`step-pill ${item.status}`}>{statusLabels[item.status]}</span>
+                    <ChevronRight size={17} />
+                  </button>
+                ))}
+                {!homeSessions.length && (
+                  <div className="getting-started">
+                    <div className="agent-glyph">
+                      <FolderPlus size={25} />
+                    </div>
+                    {workspace ? (
+                      <>
+                        <h2>В проекте пока нет сессий</h2>
+                        <p>Выберите агента и опишите задачу — история сохранится локально.</p>
+                        <button
+                          className="secondary-button"
+                          onClick={() => setDialog('new')}
+                          disabled={busy || !client}
+                        >
+                          <Plus size={16} /> Начать сессию
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <h2>Начните с папки проекта</h2>
+                        <p>Откройте локальную папку, затем создайте первую сессию.</p>
+                        <button
+                          className="secondary-button"
+                          onClick={addProject}
+                          disabled={busy || !client}
+                        >
+                          <FolderPlus size={16} /> Добавить первый проект
+                        </button>
+                      </>
+                    )}
                   </div>
-                  <h1>
-                    A place for your
-                    <br />
-                    <span>next great idea.</span>
-                  </h1>
-                  <p>
-                    Bring your projects and coding agents together.
-                    <br />
-                    One calm workspace. Everything under your control.
-                  </p>
-                  <div className="welcome-actions">
-                    <button
-                      className="primary-button"
-                      onClick={data?.workspaces.length ? newSession : addProject}
-                      disabled={busy || !client}
-                    >
-                      {data?.workspaces.length ? <Plus size={16} /> : <FolderPlus size={16} />}{' '}
-                      {data?.workspaces.length ? 'Start a session' : 'Add your first project'}{' '}
-                      <ArrowUpRight size={15} />
-                    </button>
-                    <button
-                      className="text-button"
-                      onClick={() => setDialog('settings')}
-                      disabled={!data}
-                    >
-                      Explore providers <ChevronRight size={14} />
-                    </button>
-                  </div>
-                  <div className="welcome-note">
-                    <ShieldCheck size={14} />
-                    <span>Your folders stay yours. No account required for the demo.</span>
-                  </div>
-                </div>
-                <div className="welcome-features">
+                )}
+                <div className="dashboard-note">
+                  <ShieldCheck size={18} />
                   <div>
-                    <Layers3 size={18} />
-                    <strong>Independent sessions</strong>
+                    <strong>Сейчас доступен локальный симулятор</strong>
                     <p>
-                      Separate agents, accounts
-                      <br />
-                      and task histories.
-                    </p>
-                  </div>
-                  <div>
-                    <GitBranch size={18} />
-                    <strong>Project context</strong>
-                    <p>
-                      Read Git status and diffs
-                      <br />
-                      from your local workspace.
-                    </p>
-                  </div>
-                  <div>
-                    <Terminal size={18} />
-                    <strong>A core you control</strong>
-                    <p>
-                      Rust, SQLite and native IPC.
-                      <br />
-                      No cloud workspace server.
+                      Он демонстрирует поток ответов и сохраняет историю. Подключение AI-провайдеров
+                      ещё в разработке. Файлы можно редактировать вручную.
                     </p>
                   </div>
                 </div>
@@ -609,6 +570,14 @@ export function App() {
               client={client}
               workspace={workspace}
               session={session}
+              account={account}
+              accountStatus={
+                session ? accountState.statuses[session.account_profile_id] : undefined
+              }
+              providerName={session && providerName(session.provider)}
+              openFiles={() => setDialog('files')}
+              cancel={cancelCurrent}
+              continueSession={() => composer.current?.focus()}
               close={() => setContext(false)}
             />
           )}
@@ -616,11 +585,15 @@ export function App() {
         <footer className="statusbar">
           <span>
             <ShieldCheck size={11} />{' '}
-            {browserPreview ? 'In-memory browser preview' : 'Local workspace'}
+            {browserPreview ? 'Предпросмотр в памяти' : 'Локальная рабочая область'}
           </span>
           <span>
-            {data?.sessions.filter((session) => session.status === 'running').length ?? 0} running{' '}
-            <span className="statusbar-separator">·</span> No remote access
+            {counted(data?.sessions.filter((session) => session.status === 'running').length ?? 0, [
+              'активная сессия',
+              'активные сессии',
+              'активных сессий',
+            ])}{' '}
+            <span className="statusbar-separator">·</span> Без удалённого доступа
           </span>
         </footer>
       </main>
@@ -635,10 +608,17 @@ export function App() {
       )}
       {dialog === 'new' && data && client && (
         <NewSession
+          client={client}
           data={data}
+          accountState={accountState}
           initialProject={projectId}
+          initialProvider={newSessionProvider}
+          openAccounts={() => showSettings('Провайдеры')}
           busy={busy}
-          close={() => setDialog(null)}
+          close={() => {
+            setDialog(null);
+            setNewSessionProvider(undefined);
+          }}
           create={(input) =>
             void action(async () => {
               const session = await client.createSession(input);
@@ -655,8 +635,12 @@ export function App() {
       {dialog === 'settings' && data && client && (
         <Settings
           client={client}
+          initialTab={settingsTab}
           settings={data.settings}
           providers={data.providers}
+          accounts={data.accounts}
+          accountState={accountState}
+          onAccountsChanged={reloadAccounts}
           release={release}
           updateRelease={setRelease}
           close={() => setDialog(null)}
@@ -668,6 +652,12 @@ export function App() {
           }
         />
       )}
+      {planWelcome && client && (
+        <PlanWelcome
+          close={() => setPlanWelcome('')}
+          manageUsage={() => void action(() => client.openUsage('openai'))}
+        />
+      )}
       {dialog === 'commands' && data && (
         <CommandPalette
           sessions={data.sessions}
@@ -677,22 +667,22 @@ export function App() {
             command();
           }}
           commands={[
-            { label: 'New agent session', icon: <Plus size={16} />, action: newSession },
-            { label: 'Add project folder', icon: <FolderPlus size={16} />, action: addProject },
+            { label: 'Новая сессия агента', icon: <Plus size={16} />, action: newSession },
+            { label: 'Добавить папку проекта', icon: <FolderPlus size={16} />, action: addProject },
             {
-              label: 'Open settings',
+              label: 'Открыть настройки',
               icon: <Settings2 size={16} />,
               action: () => setDialog('settings'),
             },
             {
-              label: 'Toggle context panel',
+              label: 'Показать или скрыть контекст',
               icon: <PanelRightClose size={16} />,
               action: () => setContext((value) => !value),
             },
             ...(running && client
               ? [
                   {
-                    label: 'Stop current agent',
+                    label: 'Остановить текущего агента',
                     icon: <Square size={16} />,
                     action: () => void action(() => client.cancel(sessionId)),
                   },
@@ -704,218 +694,4 @@ export function App() {
       )}
     </div>
   );
-}
-
-function NewSession({
-  data,
-  initialProject,
-  close,
-  create,
-  busy,
-}: {
-  data: Snapshot;
-  initialProject: string;
-  close: () => void;
-  create: (input: CreateSession) => void;
-  busy: boolean;
-}) {
-  const [project, setProject] = useState(initialProject || data.workspaces[0]?.id || '');
-  const [provider, setProvider] = useState(
-    data.providers.find((provider) => provider.available)?.id ?? '',
-  );
-  const availableAccounts = data.accounts.filter((account) => account.provider === provider);
-  const [account, setAccount] = useState(availableAccounts[0]?.id ?? '');
-  const models = data.providers.find((item) => item.id === provider)?.models ?? [];
-  const [model, setModel] = useState(models[0] ?? '');
-  const [permissions, setPermissions] = useState('standard');
-  return (
-    <Dialog title="New agent session" close={close}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          create({
-            workspace_id: project,
-            provider,
-            account_profile_id: account,
-            model,
-            permission_profile: permissions,
-          });
-        }}
-      >
-        <p className="muted dialog-description">Choose the engine and boundaries for this task.</p>
-        <label className="field">
-          Project
-          <select
-            aria-label="Project"
-            value={project}
-            onChange={(event) => setProject(event.target.value)}
-          >
-            {data.workspaces.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field-grid">
-          <label className="field">
-            Agent
-            <select
-              aria-label="Agent"
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                setAccount(
-                  data.accounts.find((account) => account.provider === event.target.value)?.id ??
-                    '',
-                );
-                setModel(
-                  data.providers.find((provider) => provider.id === event.target.value)
-                    ?.models[0] ?? '',
-                );
-              }}
-            >
-              {data.providers.map((item) => (
-                <option key={item.id} value={item.id} disabled={!item.available}>
-                  {item.name}
-                  {item.available ? '' : ' · not integrated'}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Account
-            <select
-              aria-label="Account"
-              value={account}
-              onChange={(event) => setAccount(event.target.value)}
-            >
-              {availableAccounts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label className="field">
-          Model
-          <select
-            aria-label="Model"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-          >
-            {models.map((model) => (
-              <option key={model}>{model}</option>
-            ))}
-          </select>
-        </label>
-        <div className="field">
-          <span>Isolation</span>
-          <div className="isolation-choice">
-            <Folder size={18} />
-            <div>
-              <strong>Current workspace</strong>
-              <p>The simulator does not read or change files.</p>
-            </div>
-            <CheckMark />
-          </div>
-          <p className="small muted">Git worktree sessions are planned for the next milestone.</p>
-        </div>
-        <label className="field">
-          Permissions
-          <select
-            aria-label="Permissions"
-            value={permissions}
-            onChange={(event) => setPermissions(event.target.value)}
-          >
-            <option value="standard">Standard</option>
-            <option value="read_only">Read only</option>
-          </select>
-        </label>
-        <div className="dialog-footer">
-          <button type="button" className="secondary-button" onClick={close}>
-            Cancel
-          </button>
-          <button
-            className="primary-button"
-            type="submit"
-            disabled={busy || !project || !provider || !account || !model}
-          >
-            <Plus size={15} /> Create session
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-function CheckMark() {
-  return <span className="choice-check">✓</span>;
-}
-interface PaletteCommand {
-  label: string;
-  icon: React.ReactNode;
-  action: () => void;
-}
-function CommandPalette({
-  commands,
-  sessions,
-  close,
-  run,
-  select,
-}: {
-  commands: PaletteCommand[];
-  sessions: Session[];
-  close: () => void;
-  run: (command: () => void) => void;
-  select: (session: Session) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const all = [
-    ...commands,
-    ...sessions.map((session) => ({
-      label: `Switch to ${session.title}`,
-      icon: <Sparkles size={16} />,
-      action: () => select(session),
-    })),
-  ];
-  const matches = all.filter((command) => fuzzyMatch(query, command.label));
-  return (
-    <Dialog title="Commands" close={close}>
-      <div className="palette-search">
-        <Search size={18} />
-        <input
-          autoFocus
-          aria-label="Search commands"
-          placeholder="Find a command or session…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && matches[0]) run(matches[0].action);
-          }}
-        />
-        <Command size={15} />
-      </div>
-      <div className="palette-list">
-        {matches.map((command, index) => (
-          <button key={`${command.label}-${index}`} onClick={() => run(command.action)}>
-            {command.icon}
-            <span>{command.label}</span>
-            <ChevronRight size={14} />
-          </button>
-        ))}
-        {!matches.length && <p className="muted">No matching commands.</p>}
-      </div>
-    </Dialog>
-  );
-}
-function fuzzyMatch(query: string, text: string): boolean {
-  let position = 0;
-  const haystack = text.toLowerCase();
-  for (const character of query.trim().toLowerCase()) {
-    position = haystack.indexOf(character, position);
-    if (position < 0) return false;
-    position++;
-  }
-  return true;
 }

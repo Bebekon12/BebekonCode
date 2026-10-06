@@ -3,6 +3,7 @@ name = "agent-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 serde.workspace = true
@@ -19,6 +20,20 @@ tracing = "0.1"
 regex = "1"
 keyring = { version = "3", features = ["windows-native"] }
 which = "8"
+jsonwebtoken = { version = "9", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+tokio-util = { version = "0.7", features = ["rt", "codec"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+] }

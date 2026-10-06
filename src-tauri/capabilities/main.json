@@ -3,5 +3,13 @@
   "identifier": "main-window",
   "description": "Local desktop UI. Project-scoped Rust commands handle user file actions. No frontend shell or arbitrary network API.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-destroy", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-destroy",
+    "dialog:allow-open",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
 }

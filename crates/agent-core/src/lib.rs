@@ -1,14 +1,17 @@
 pub mod capabilities;
+pub mod codex;
 pub mod credentials;
 pub mod error;
 pub mod files;
 pub mod git;
 pub mod model;
 pub mod permissions;
+pub mod process;
 pub mod provider;
 pub mod redaction;
 pub mod releases;
 mod runtime;
+pub mod secret_file;
 pub mod storage;
 
 pub use error::{CoreError, Result};

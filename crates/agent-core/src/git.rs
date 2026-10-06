@@ -53,7 +53,7 @@ async fn read_git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
             .map_err(|_| CoreError::Git)?;
         if bytes.len() as u64 > OUTPUT_LIMIT {
             return Err(CoreError::Invalid(
-                "Git output exceeds 2 MiB; use an external Git client".into(),
+                "Вывод Git превышает 2 МиБ. Используйте внешний клиент Git".into(),
             ));
         }
         if !child.wait().await.map_err(|_| CoreError::Git)?.success() {
@@ -76,7 +76,7 @@ pub async fn status(root: &Path) -> Result<GitStatus> {
     let branch = String::from_utf8_lossy(&branch).trim().to_string();
     Ok(GitStatus {
         branch: if branch.is_empty() {
-            "Detached HEAD".into()
+            "Отсоединённый HEAD".into()
         } else {
             branch
         },
@@ -118,7 +118,7 @@ pub async fn diff(root: &Path) -> Result<String> {
     )
     .await?;
     Ok(format!(
-        "Unstaged changes\n{}\nStaged changes\n{}",
+        "Изменения вне индекса\n{}\nИзменения в индексе\n{}",
         String::from_utf8_lossy(&unstaged),
         String::from_utf8_lossy(&staged)
     ))

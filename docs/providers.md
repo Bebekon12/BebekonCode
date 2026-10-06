@@ -1,29 +1,39 @@
 # Providers
 
-## Available now
+Providers implement `AgentProvider` (`crates/agent-core/src/provider.rs`). Session management,
+storage and the UI never branch on a provider id; unsupported features stay visibly unavailable.
 
-MockProvider is the only runnable provider. `mock-stream-v1` is a deterministic simulator,
-not a hosted model. It emits illustrative planning activity and text without reading the project.
-The local demo account requires no authentication. OpenAI/Anthropic are detected by executable
-path but explicitly unavailable; detection is not connection or proof of version compatibility.
+## Local demo (`mock`)
 
-## Planned official adapters
+Deterministic simulator for development. It emits illustrative activity and text without reading
+the project. Its built-in account needs no sign-in.
 
-OpenAI: app-server over stdio, initialize/initialized, thread/start/resume and turn/start.
-Normalized agent-message deltas and terminal turn status must be translated in the adapter.
-For independent subscription profiles, use documented Sign in with ChatGPT registration and
-token lifecycle. Each profile has a stable UUID, registration and native credential reference.
-Do not reuse a consumer client registration or import auth.json. `model/list` supplies a catalog,
-not guaranteed entitlement. Quota failure never changes the session's account.
+## OpenAI / Codex (`openai`)
 
-Anthropic: official installed Claude Code, programmatic stream-json or an officially supported
-permission-capable host transport. Each profile gets a separate CLAUDE_CONFIG_DIR under app
-data. Login is performed by Claude's official flow in that profile. Do not copy tokens or read
-another application's credentials. Validate how configuration isolation covers auth for the
-tested installed version; directory isolation alone is not a blanket credential security claim.
+Official `codex app-server` over stdio, one process per account (`crates/agent-core/src/codex`).
 
-Before implementation, verify versioned protocol fixtures, account isolation, cancellation,
-permissions, rate-limit events, environment filtering and Windows Job Object cleanup. No CLI
-versions are claimed as tested for actual provider inference in 0.1.0.
+- **Accounts.** Each account has its own Sign in with ChatGPT registration (issued client id), a
+  DPAPI-protected credential record and its own `CODEX_HOME`. Accounts never share tokens.
+- **Sign-in.** "Continue with ChatGPT" opens OpenAI's authorization page; a one-shot listener on
+  `127.0.0.1` receives the callback, then the code is exchanged and the ID token validated.
+- **Sessions.** `thread/start` / `thread/resume` / `turn/start` / `turn/interrupt`. The Codex thread
+  id is stored as the session's `provider_session_id`. A session's account never changes.
+- **Events.** Agent-message deltas, commands, file changes, MCP calls, web search, plans and errors
+  are normalized in `codex/mapping.rs`.
+- **Approvals.** Command and file-change requests appear in the timeline with command, folder and
+  reason: allow once, allow for the session, or deny. Other request types are declined visibly.
+- **Models, plugins, MCP, skills.** `model/list`, `plugin/list`, `mcpServerStatus/list` and
+  `skills/list` per account.
+- **Usage.** Shown only when Codex reports it; otherwise the account links to ChatGPT usage
+  settings. A usage-limit error stops work; switching accounts is a manual user action.
+- **Process hygiene.** Allowlisted environment (no other provider's keys), no console window, each
+  process tree in its own kill-on-close Job Object, pipes read on dedicated OS threads.
 
-See [provider compliance](provider-compliance.md) for official sources and review date.
+Tested with codex-cli 0.160.1. Live checks that start the real CLI without signing in:
+`cargo test -p agent-core --test codex_live -- --ignored`.
+
+## Anthropic / Claude Code (`anthropic`)
+
+Detected only. Planned: the unmodified installed Claude Code, one `CLAUDE_CONFIG_DIR` per account,
+sign-in through Claude Code's own flow, `claude -p` with `stream-json`. See
+[provider compliance](provider-compliance.md) for the constraints that apply.

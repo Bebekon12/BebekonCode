@@ -14,6 +14,7 @@ import type { ClientTransport, FileEntry, Workspace } from '../contracts';
 import { Dialog } from './Dialog';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { displayPath, errorText } from '../locale';
 
 export function FileManager({
   client,
@@ -49,7 +50,7 @@ export function FileManager({
     void window
       .onCloseRequested((event) => {
         event.preventDefault();
-        if (busy) setError('Wait for the current file operation to finish.');
+        if (busy) setError('Дождитесь завершения операции с файлом.');
         else
           setDecision(() => () => {
             void window.destroy();
@@ -77,7 +78,7 @@ export function FileManager({
         if (alive) setEntries(entries);
       })
       .catch((error) => {
-        if (alive) setError(String(error));
+        if (alive) setError(errorText(error));
       })
       .finally(() => {
         if (alive) {
@@ -109,7 +110,7 @@ export function FileManager({
     try {
       await action();
     } catch (error) {
-      setError(String(error));
+      setError(errorText(error));
     } finally {
       setBusy(false);
     }
@@ -137,7 +138,7 @@ export function FileManager({
       const saved = original.includes('\r\n') ? content.replace(/\r?\n/g, '\r\n') : content;
       await client.saveFile(workspace.id, selected.path, original, saved);
       setOriginal(saved);
-      setNotice('Saved to disk.');
+      setNotice('Сохранено на диске.');
     });
   }
   async function mutate() {
@@ -157,16 +158,16 @@ export function FileManager({
     });
   }
   return (
-    <Dialog title={`${workspace.name} · Project files`} close={() => guard(close)} wide>
+    <Dialog title={`${workspace.name} · Файлы проекта`} close={() => guard(close)} wide>
       <div className="file-manager">
-        <code className="file-root" title={workspace.root}>
-          {workspace.root}
+        <code className="file-root" title={displayPath(workspace.root)}>
+          {displayPath(workspace.root)}
         </code>
         {decision && (
           <div className="notice file-decision" role="alert">
-            <span>Discard unsaved changes to {selected?.name}?</span>
+            <span>Не сохранять изменения в файле «{selected?.name}»?</span>
             <button autoFocus className="button" onClick={() => setDecision(null)}>
-              Keep editing
+              Продолжить редактирование
             </button>
             <button
               className="button danger"
@@ -176,7 +177,7 @@ export function FileManager({
                 action();
               }}
             >
-              Discard
+              Не сохранять
             </button>
           </div>
         )}
@@ -192,7 +193,7 @@ export function FileManager({
               })
             }
           >
-            <Plus size={15} /> New file
+            <Plus size={15} /> Новый файл
           </button>
           <button
             className="button"
@@ -205,14 +206,14 @@ export function FileManager({
               })
             }
           >
-            <FolderPlus size={15} /> New folder
+            <FolderPlus size={15} /> Новая папка
           </button>
           <button
             className="button"
             disabled={locked}
             onClick={() => void perform(() => client.openProject(workspace.id, false))}
           >
-            <FolderOpen size={15} /> Explorer
+            <FolderOpen size={15} /> Проводник
           </button>
           <button
             className="button"
@@ -242,16 +243,16 @@ export function FileManager({
           >
             {operation === 'delete' ? (
               <p>
-                Delete <strong>{selected?.path}</strong> permanently? This cannot be undone. Only
-                files and empty folders can be deleted.
+                Удалить <strong>{selected?.path}</strong> безвозвратно? Восстановить удаление
+                нельзя. Удалять можно файлы и пустые папки.
               </p>
             ) : (
               <label>
                 {operation === 'rename'
-                  ? 'New project-relative path'
-                  : `New ${operation} name in ${directory || 'project root'}`}
+                  ? 'Новый путь относительно проекта'
+                  : `Имя ${operation === 'folder' ? 'новой папки' : 'нового файла'} в папке «${directory || 'корень проекта'}»`}
                 <input
-                  aria-label="Filename"
+                  aria-label="Имя файла"
                   autoFocus
                   value={name}
                   onChange={(event) => setName(event.target.value)}
@@ -264,7 +265,7 @@ export function FileManager({
               className={`button ${operation === 'delete' ? 'danger' : 'primary'}`}
               disabled={locked || (operation !== 'delete' && !name.trim())}
             >
-              {operation === 'delete' ? 'Delete permanently' : 'Confirm'}
+              {operation === 'delete' ? 'Удалить безвозвратно' : 'Подтвердить'}
             </button>
             <button
               type="button"
@@ -272,16 +273,16 @@ export function FileManager({
               disabled={locked}
               onClick={() => setOperation(null)}
             >
-              Cancel
+              Отмена
             </button>
           </form>
         )}
         <div className="file-layout">
-          <section className="file-browser" aria-label="Project file browser">
+          <section className="file-browser" aria-label="Файловый менеджер проекта">
             <div className="file-navigation">
               <button
                 className="icon-button"
-                aria-label="Parent folder"
+                aria-label="На уровень выше"
                 disabled={locked || !directory}
                 onClick={() =>
                   guard(() => {
@@ -295,7 +296,7 @@ export function FileManager({
               <code title={directory}>{directory || '/'}</code>
               <button
                 className="icon-button"
-                aria-label="Refresh files"
+                aria-label="Обновить список файлов"
                 disabled={locked}
                 onClick={() => setRevision((value) => value + 1)}
               >
@@ -311,7 +312,7 @@ export function FileManager({
                   <button
                     title={
                       entry.blocked
-                        ? 'Protected Git internals, link or unsupported name'
+                        ? 'Служебные файлы Git, ссылка или неподдерживаемое имя'
                         : entry.path
                     }
                     disabled={locked || entry.blocked}
@@ -340,19 +341,19 @@ export function FileManager({
                 </div>
               ))}
               {!entries.length && !busy && (
-                <p className="muted small">No accessible entries in this folder.</p>
+                <p className="muted small">В папке нет доступных элементов.</p>
               )}
               {busy && (
                 <p className="muted small" role="status">
-                  Working with local files…
+                  Работа с локальными файлами…
                 </p>
               )}
             </div>
           </section>
-          <section className="file-editor" aria-label="File editor">
+          <section className="file-editor" aria-label="Редактор файлов">
             <div className="file-editor-heading">
               <code title={selected?.path}>
-                {selected?.path ?? 'Select a file'}
+                {selected?.path ?? 'Выберите файл'}
                 {dirty ? ' *' : ''}
               </code>
               <button
@@ -360,14 +361,14 @@ export function FileManager({
                 disabled={locked || !dirty}
                 onClick={() => void save()}
               >
-                <Save size={14} /> Save
+                <Save size={14} /> Сохранить
               </button>
             </div>
             {selected && (
               <div className="file-editor-actions">
                 {!selected.directory && (
                   <button className="button" disabled={locked} onClick={() => open(selected)}>
-                    Reload
+                    Перечитать с диска
                   </button>
                 )}
                 <button
@@ -381,7 +382,7 @@ export function FileManager({
                     })
                   }
                 >
-                  Rename / move
+                  Переименовать / переместить
                 </button>
                 <button
                   className="button danger"
@@ -393,13 +394,13 @@ export function FileManager({
                     })
                   }
                 >
-                  Delete…
+                  Удалить…
                 </button>
               </div>
             )}
             {editable ? (
               <textarea
-                aria-label="File content"
+                aria-label="Содержимое файла"
                 className="file-content"
                 spellCheck={false}
                 value={content}
@@ -415,9 +416,9 @@ export function FileManager({
             ) : (
               <div className="file-editor-empty">
                 <File size={28} />
-                <p>Open a UTF-8 text file to edit it.</p>
+                <p>Откройте текстовый файл UTF-8 для редактирования.</p>
                 <span className="muted small">
-                  Up to 2 MiB · Ctrl S to save · changes are written to your local disk
+                  До 2 МиБ · Ctrl S — сохранить · изменения записываются на ваш диск
                 </span>
               </div>
             )}

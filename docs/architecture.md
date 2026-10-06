@@ -1,6 +1,6 @@
 # Architecture and initial plan
 
-Status: implemented local desktop slice and manual file manager, version 0.2.0. This is an early development release,
+Status: implemented local desktop slice, manual file manager and Russian UI, version 0.2.1. This is an early development release,
 not the full production V1. The product name is BebekonCode; UI identity and repository live in
 `product.json`, installer identity in `src-tauri/tauri.conf.json`. Keep the application identifier
 stable when renaming so existing local data is retained.
@@ -62,6 +62,8 @@ One run owns one CancellationToken; the active-run registry rejects overlapping 
 a session while allowing other sessions to progress. On core restart, running sessions become
 interrupted; no prompt is replayed automatically. On a UI reload, live events and the persisted
 timeline reconnect. A second desktop instance focuses the first instead of reopening its DB.
+An explicit absolute `--data-dir` selects an independent data profile; the single-instance
+namespace uses a SHA-256 fingerprint of its canonical path. Default identity/data remain stable.
 
 ## Next milestones
 

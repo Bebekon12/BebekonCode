@@ -1,10 +1,9 @@
 # Provider compliance
 
-Official documentation last checked: **2026-10-06**. This records technical integration research,
-not a claim that the entire future product has received provider approval or a legal audit.
-Only the local MockProvider runs in this release.
+Official documentation last checked: **2026-10-06**. This records technical integration research
+and the resulting design. It is not a claim of provider approval or a legal audit.
 
-Repository-wide prohibitions:
+Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 
 - No web scraping or browser cookie extraction.
 - No undocumented consumer APIs or provider impersonation.
@@ -14,22 +13,76 @@ Repository-wide prohibitions:
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
 
-These rules also appear in [AGENTS.md](../AGENTS.md).
+## OpenAI / Codex (implemented in 0.3.0)
 
-Official references reviewed:
+Route: **Sign in with ChatGPT — ChatGPT plan usage for open-source and locally hosted apps**,
+driving the official `codex app-server` over stdio exactly as that documentation describes.
 
-- [OpenAI Codex app-server and ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)
-  documents stdio initialization, app attribution, token replacement and thread resume.
-- [Codex App Server](https://learn.chatgpt.com/docs/app-server) describes the official host protocol.
-- [Claude Code programmatic use](https://code.claude.com/docs/en/headless) documents CLI JSON
-  streaming, interruption and permission behavior; never infer that headless mode bypasses approvals.
-- [Claude Code settings](https://code.claude.com/docs/en/settings) documents per-directory config
-  through CLAUDE_CONFIG_DIR. Verify installed-version authentication behavior before enabling accounts.
+- [Overview](https://developers.openai.com/siwc/token-sharing-open-source): the flow is for
+  open-source and locally hosted apps; paid or remotely hosted apps must use OpenAI's interest
+  form instead. BebekonCode is free and runs locally. The public repository currently has no
+  open-source licence; adding one is an owner decision that should precede wide distribution.
+- [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in):
+  dynamic registration with `client_id=dynamic_agent_client`, `agent_name_hint=BebekonCode`, a
+  stable `ext_agent_host_id` (`urn:uuid:` per installation), PKCE S256, fresh `state`/`nonce`,
+  `resource=https://api.openai.com/v1`, loopback callback on `127.0.0.1` (never `localhost`),
+  ID-token validation against OpenAI JWKS (issuer, audience = issued client id, expiry, nonce),
+  and the `chatgpt.tokens.use.direct` scope check before any inference.
+- [Accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions):
+  every account is a separate registration with its own issued client id and credentials, even
+  with the same email. Refresh uses the issued client id and is serialized per account. Sign-out
+  revokes the refresh token and reports when revocation could not be confirmed.
+- [Codex app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server):
+  app-server is started with the documented `openai_chatgpt_plan` provider settings and the access
+  token in `ACCESS_TOKEN`; `clientInfo.name` equals the `agent_name_hint`. Token renewal restarts
+  the process and resumes threads with `thread/resume`. `model/list` is a catalog, not entitlement.
+- [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)
+  and [UI/UX guidelines](https://developers.openai.com/siwc/ui-ux-guidelines): usage limits stop
+  work and link to [ChatGPT usage settings](https://chatgpt.com/settings/usage); the sign-in button
+  reads "Continue with ChatGPT"; a one-time confirmation explains that the plan is used; the
+  composer shows "Используется план ChatGPT" with a "Manage usage" link.
+- [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations):
+  image generation, file search, hosted MCP/connectors and similar hosted tools are unavailable
+  on this route, so `generate_image` remains unavailable for OpenAI ChatGPT-plan accounts.
+
+Usage and limits: this route documents no in-app usage API. The app shows limit snapshots only
+if Codex itself reports them (`account/rateLimits/updated`) and otherwise links to ChatGPT usage
+settings. No percentages are estimated.
+
+Not used on purpose: Codex's own built-in ChatGPT login (`account/login/start`), the
+`chatgptAuthTokens` mode marked "for OpenAI internal use only", importing or reading any
+`auth.json`, and `danger-full-access` sandboxing. Sandbox is `workspace-write` or `read-only`
+with `approvalPolicy=on-request`; every approval request is shown to the user.
+
+Protocol facts (methods, fields, error codes) were taken from the schema generated by the installed
+CLI (`codex app-server generate-json-schema`, codex-cli 0.160.1). The app-server protocol is marked
+experimental; other CLI versions are flagged in the provider card.
+
+## Anthropic / Claude Code (next milestone, not yet implemented)
+
+- [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance): third-party apps may
+  not offer claude.ai login of their own or route requests through Free/Pro/Max credentials on behalf
+  of users, and may not collect, store or intermediate claude.ai credentials. An end user may sign in
+  to the **unmodified** Claude Code binary with their own subscription, including when another
+  product runs Claude Code. The binary must not be modified and its authentication methods must not
+  be removed. Claude Code names and logos may not be used as BebekonCode's own branding.
+- [Authentication](https://code.claude.com/docs/en/authentication): one `CLAUDE_CONFIG_DIR` per
+  account keeps logins separate; sign-in happens through Claude Code's own flow
+  (`claude auth login` / `/login`). BebekonCode must never read `.credentials.json` and must not use
+  `claude setup-token` tokens.
+- [Headless](https://code.claude.com/docs/en/headless) and [CLI reference](https://code.claude.com/docs/en/cli-reference):
+  `claude -p` with `stream-json`, `system/init` (plugins, MCP servers), `--permission-prompt-tool`
+  for approvals, `claude mcp` and `claude plugin` for per-profile extensions.
+- [Status line](https://code.claude.com/docs/en/statusline): 5-hour and 7-day usage percentages are
+  officially documented only for the interactive status line. The headless `rate_limit_event` is
+  not documented; if shown, it must be labelled as unverified CLI output.
+
+## Other references
+
 - [Tauri updater](https://v2.tauri.app/plugin/updater/) requires update artifact signature verification.
 - [Tauri GitHub distribution](https://v2.tauri.app/distribute/pipelines/github/) describes installer
   builds and release publishing with GitHub Actions.
 - [GitHub Releases REST API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
   documents stable release metadata used by the manual checker.
 
-Recheck registration, login, token storage/refresh and model availability immediately before
-shipping real adapters. Do not treat a catalog as entitlement or a draft design as authorization.
+Recheck these sources before changing provider behavior or shipping a new provider integration.

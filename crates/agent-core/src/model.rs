@@ -46,15 +46,118 @@ pub struct CreateSession {
     pub permission_profile: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventPayload {
-    TurnStarted { prompt: String },
-    AssistantTextDelta { text: String },
-    ToolActivity { label: String, detail: String },
+    TurnStarted {
+        prompt: String,
+    },
+    AssistantTextDelta {
+        text: String,
+    },
+    ToolActivity {
+        label: String,
+        detail: String,
+    },
+    /// The agent asks the user before acting. Shown verbatim; never auto-approved by the app.
+    ApprovalRequested {
+        id: String,
+        kind: String,
+        title: String,
+        detail: String,
+        cwd: Option<String>,
+        reason: Option<String>,
+    },
+    ApprovalResolved {
+        id: String,
+        decision: String,
+    },
     TurnCompleted,
     SessionStopped,
-    ProviderError { message: String },
+    ProviderError {
+        message: String,
+        /// `usage_limit`, `auth` or absent. Never triggers an automatic account switch.
+        #[serde(default)]
+        kind: Option<String>,
+    },
+    /// Internal: binds the session to the provider's own conversation id. Never persisted.
+    ProviderSession {
+        id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    AllowOnce,
+    AllowSession,
+    Deny,
+}
+
+/// Live account state reported by the provider. Values the provider does not report stay empty
+/// instead of being estimated.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AccountStatus {
+    pub account_id: String,
+    /// `signed_in`, `signed_out`, `not_required`, `unavailable` or `error`.
+    pub state: String,
+    pub email: Option<String>,
+    pub plan: Option<String>,
+    pub usage: Vec<UsageWindow>,
+    pub limit_reached: Option<String>,
+    pub credits: Option<String>,
+    pub message: Option<String>,
+    /// Whether requests are authorized to use the user's ChatGPT plan (granted OAuth scope).
+    pub plan_usage_enabled: Option<bool>,
+    /// Official page where the provider shows usage and limits for this account.
+    pub manage_usage_url: Option<String>,
+    pub checked_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UsageWindow {
+    pub window_minutes: Option<i64>,
+    pub used_percent: f64,
+    pub resets_at: Option<i64>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Extensions {
+    pub plugins: Vec<ExtensionItem>,
+    pub mcp_servers: Vec<ExtensionItem>,
+    pub skills: Vec<ExtensionItem>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionItem {
+    pub name: String,
+    pub detail: Option<String>,
+    pub enabled: bool,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginStart {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountEvent {
+    pub account_id: String,
+    /// `login_completed`, `login_failed`, `updated`, `usage` or `notice`.
+    pub kind: String,
+    pub status: Option<AccountStatus>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

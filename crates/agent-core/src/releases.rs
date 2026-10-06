@@ -37,7 +37,7 @@ fn interpret(release: Option<GithubRelease>, current: &str, repo: &str) -> Resul
         current_version: current.into(),
         latest_version: None,
         available: false,
-        notes: "No published stable release yet.".into(),
+        notes: "Опубликованных стабильных выпусков пока нет.".into(),
         published_at: None,
         release_url: format!("https://github.com/{repo}/releases"),
         checked_at: crate::model::now(),

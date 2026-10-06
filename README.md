@@ -1,59 +1,70 @@
-# BebekonCode · AI developer workspace
+# BebekonCode — локальная среда разработки с ИИ
 
-A local Windows desktop workspace for coding agents. Rust core, Tauri 2, React and SQLite.
-Source repository: [BebekonCode](https://github.com/Bebekon12/BebekonCode).
+Приложение для Windows на Rust, Tauri 2, React и SQLite.
+[Репозиторий](https://github.com/Bebekon12/BebekonCode) ·
+[Выпуски](https://github.com/Bebekon12/BebekonCode/releases) ·
+[Что ещё осталось сделать](docs/roadmap.ru.md)
 
-**0.2.0 is a development release, not the complete production V1.** The local demo works:
-add a project, create independent sessions, send messages, watch streaming, stop a turn and reopen
-saved history. Read your actual Git status/diff. OpenAI and Claude are detected but not connected;
-the demo does not inspect or edit project files. The separate user-operated file manager reads
-and edits real project files. No credentials are required to try it.
+**0.3.0 — ранняя версия для разработки.** Локальные файлы, проекты, история сессий и Git
+работают. Настоящие адаптеры OpenAI / Codex и Anthropic / Claude Code ещё не подключены.
+Локальное демо показывает потоковый вывод и остановку; оно не читает и не меняет файлы.
+Интерфейс, сообщения приложения и установщики на русском языке.
 
-## Install the Windows app
+## Установка и запуск
 
-Download `BebekonCode_0.2.0_x64-setup.exe` from [GitHub Releases](https://github.com/Bebekon12/BebekonCode/releases).
-For a standalone launch, use `BebekonCode_0.2.0_x64.exe` (WebView2 Runtime must already be installed).
-The installed app runs as `bebekoncode-desktop.exe` with a bundled UI in WebView2. End users do
-not run a browser, npm, Node or a development server. WebView2 is the Windows rendering runtime.
+Для Windows 11 x64 скачайте `BebekonCode_0.3.0_x64-setup.exe` из
+[GitHub Releases](https://github.com/Bebekon12/BebekonCode/releases).
+Для запуска без установки используйте `BebekonCode_0.3.0_x64.exe`; нужен установленный WebView2.
+Доступен и установщик MSI на русском. Браузер, Node.js и npm пользователю не нужны.
 
-Select a project and click **Project files** to browse local folders, create files/folders,
-edit UTF-8 text, save with Ctrl S, rename/move entries, or permanently delete a file/empty folder
-after confirmation. Explorer opens the project in Windows; PowerShell opens a visible native
-terminal with the project as its working directory. The terminal is external, not embedded.
-Files larger than 2 MiB, binary files, other encodings and nonempty-folder deletion use external
-Windows tools. Junctions, links, reserved names, traversal and `.git` internals are blocked in
-the built-in file manager. Saves check for external content changes and replace the file from
-a same-directory temporary file; unsaved edits require a discard decision before navigation.
+## Работа с файлами
 
-## Requirements
+Добавьте папку проекта и откройте **Файлы проекта**. Доступны просмотр папок, создание файлов
+и папок, редактирование UTF-8 до 2 МиБ, сохранение (Ctrl S), переименование/перемещение и
+безвозвратное удаление файла или пустой папки после подтверждения.
 
-For development: Windows 11 x64, WebView2 Runtime, Rust stable (MSVC), Visual Studio 2022 Build Tools with Desktop
-development with C++, Windows SDK, Node.js 22+ and npm. Git is optional for the app, required to
-develop this repository. No Electron, Chromium service, Node backend or SQLite service is used.
+Перед сохранением приложение проверяет, не изменился ли файл на диске. Несохранённые изменения
+требуют решения при переходе к другому файлу и закрытии окна. Сохранение сохраняет CRLF/LF.
+Ссылки, Windows junction, переходы за пределы проекта, зарезервированные имена и `.git`
+блокируются встроенным редактором. Права доступа и ограничения ОС сохраняют своё действие.
+Гонки с недоверенными внешними процессами и сохранение специальных ACL требуют дальнейшей работы.
 
-## Run
+**Проводник** открывает проект в Windows. **PowerShell** открывает отдельное окно терминала
+в папке проекта. Встроенный терминал появится позже. Двоичные файлы, другие кодировки,
+большие файлы и удаление непустых папок пока обслуживаются внешними инструментами Windows.
+
+## Обновления
+
+Откройте **Настройки → О программе и обновления → Проверить обновления**.
+Проверка при запуске включается отдельно. Приложение получает сведения о последнем стабильном
+выпуске GitHub и показывает изменения; скачивание и установка пока ручные.
+Каждая версия имеет тег `vX.Y.Z` и запись в [истории изменений](CHANGELOG.md).
+Подпись выпусков и подписанные автоматические обновления ещё не настроены.
+
+## Разработка
+
+Нужны Windows 11 x64, WebView2 Runtime, Rust stable/MSVC, Visual Studio 2022 Build Tools
+с C++, Windows SDK, Node.js 22+ и npm. Git необязателен для приложения, но нужен разработчику.
+Electron, отдельный Chromium, постоянный Node-сервер и служба SQLite не используются.
 
 ```powershell
 npm ci
 npm run dev
 ```
 
-The launcher finds the usual `%USERPROFILE%\.cargo\bin` when Cargo is absent from PATH.
-For frontend-only visual development use `npm run dev:ui` and
-`http://localhost:1420/?preview=1`. This explicitly labeled preview uses memory instead of SQLite
-and cannot access files or providers. Production browser loading is disabled.
-
-## Build and package
+Запускатель находит Cargo в `%USERPROFILE%\.cargo\bin`, если его нет в PATH.
+`npm run dev:ui` и `http://localhost:1420/?preview=1` — только визуальный предпросмотр
+для разработки, без реальной файловой системы. В обычной браузерной сборке приложение не работает.
 
 ```powershell
-npm run build
 npm run package
 ```
 
-Installers are emitted to `target/release/bundle/nsis` and `target/release/bundle/msi`.
-Uninstall removes the application, not your project folders. App data is retained.
+Исполняемый файл: `target/release/bebekoncode-desktop.exe`. Установщики находятся в
+`target/release/bundle/nsis` и `target/release/bundle/msi`.
+Удаление приложения не удаляет проекты; локальные данные сохраняются.
 
-## Test
+## Проверки
 
 ```powershell
 cargo fmt --all --check
@@ -65,38 +76,26 @@ npm test
 npm run build
 npx playwright install chromium
 npm run test:e2e
+npm run test:native
 ```
 
-For an installed Edge instead of Playwright's browser: set `$env:PLAYWRIGHT_CHANNEL = 'msedge'`.
-Browser tests cover the development UI adapter; Rust tests validate persistence and runtime.
-After packaging, `npm run test:native` checks the actual executable's WebView2/IPC and file CRUD
-using an isolated temporary profile. Only that test process enables a loopback debug connection.
-These tests are not full installer automation or real provider end-to-end tests.
+Последняя команда требует собранного EXE и Windows. Она проверяет настоящие WebView2/IPC
+и операции на диске в отдельном временном профиле. Подключение отладчика включается только
+для процесса этой проверки. Для UI-тестов с установленным Edge задайте
+`$env:PLAYWRIGHT_CHANNEL = 'msedge'`. Эти проверки не заменяют полный тест установки
+и настоящих провайдеров. Подробности — в [протоколе проверок](docs/validation.md).
 
-## Releases and updates
+## Данные и устройство приложения
 
-[GitHub Releases](https://github.com/Bebekon12/BebekonCode/releases) are the distribution source.
-See [release procedure](docs/releases.md) and [CHANGELOG.md](CHANGELOG.md). Each version is
-tracked by a `vX.Y.Z` Git tag, a reviewed changelog entry and Windows installers.
-Settings → About & updates checks the latest stable release and displays its notes. Startup
-checks are opt-in. Downloads and installation are manual in 0.1.0; automatic installation
-will use the official signed Tauri updater after signing is configured.
+По умолчанию база находится в `%LOCALAPPDATA%\com.bebekon.agent-workspace\workspace.db`.
+`--data-dir D:\absolute\folder` выбирает отдельный локальный профиль с независимой защитой
+от второго экземпляра. Основной идентификатор приложения сохраняется при переименовании,
+поэтому старые проекты и история доступны после обновления.
+Учётные данные провайдеров должны храниться в системном хранилище, а не в SQLite.
+Телеметрии, удалённого сервера и автоматического переключения аккаунтов нет.
 
-## Architecture, provider setup and security
-
-- [Architecture and next milestones](docs/architecture.md)
-- [Security boundaries and limitations](docs/security.md)
-- [Provider setup and planned official integrations](docs/providers.md)
-- [Permission profiles](docs/permissions.md)
-- [Provider compliance and official documentation](docs/provider-compliance.md)
-- [Future mobile transport](docs/mobile-future.md)
-
-App state lives under `%LOCALAPPDATA%\com.bebekon.agent-workspace\workspace.db`.
-An explicit `--data-dir D:\absolute\folder` launch option selects a separate local data profile,
-including for isolated native smoke tests. The stable default identifier preserves existing data.
-SQLite stores metadata and private local transcripts; provider secrets belong only in native
-secure storage. No telemetry, remote listener, automatic account rotation or permission bypass.
-
-Product identity is configured in `product.json` and `src-tauri/tauri.conf.json`; keep the stable
-identifier when renaming. UI settings currently provide the implemented controls and explicitly
-label future integrations, rather than exposing inactive login or execution buttons.
+Технические документы: [архитектура](docs/architecture.md), [безопасность](docs/security.md),
+[провайдеры](docs/providers.md), [разрешения](docs/permissions.md),
+[официальные правила интеграций](docs/provider-compliance.md), [процедура выпуска](docs/releases.md).
+Название и описание задаются в `product.json`, параметры установщика — в `src-tauri/tauri.conf.json`.
+Параметры русского установщика следуют [документации Tauri](https://v2.tauri.app/distribute/windows-installer/).

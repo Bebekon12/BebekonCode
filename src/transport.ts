@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { ClientTransport, AgentEvent } from './contracts';
+import type { AccountEvent, AgentEvent, ClientTransport } from './contracts';
 
 export const desktop: ClientTransport = {
   listFiles: (workspaceId, path) =>
@@ -19,7 +19,7 @@ export const desktop: ClientTransport = {
   openProject: (workspaceId, terminal) => invoke('open_project', { workspaceId, terminal }),
   snapshot: () => invoke('snapshot'),
   chooseFolder: async () => {
-    const path = await open({ directory: true, multiple: false, title: 'Add a project folder' });
+    const path = await open({ directory: true, multiple: false, title: 'Добавить папку проекта' });
     return typeof path === 'string' ? path : null;
   },
   addWorkspace: (root) => invoke('add_workspace', { root }),
@@ -43,6 +43,19 @@ export const desktop: ClientTransport = {
     }
   },
   refreshProviders: () => invoke('refresh_providers'),
+  addAccount: (provider, label) => invoke('add_account', { provider, label }),
+  renameAccount: (accountId, label) => invoke('rename_account', { accountId, label }),
+  removeAccount: (accountId) => invoke('remove_account', { accountId }),
+  accountStatus: (accountId) => invoke('account_status', { accountId }),
+  accountLogin: (accountId) => invoke('account_login', { accountId }),
+  accountLogout: (accountId) => invoke('account_logout', { accountId }),
+  accountModels: (accountId) => invoke('account_models', { accountId }),
+  accountExtensions: (accountId) => invoke('account_extensions', { accountId }),
+  subscribeAccounts: (onEvent) =>
+    listen<AccountEvent>('account-event', (event) => onEvent(event.payload)),
+  resolveApproval: (sessionId, approvalId, decision) =>
+    invoke('resolve_approval', { sessionId, approvalId, decision }),
+  openUsage: (provider) => invoke('open_usage', { provider }),
   saveSettings: (settings) => invoke('save_settings', { settings }),
   gitStatus: (workspaceId) => invoke('git_status', { workspaceId }),
   gitDiff: (workspaceId) => invoke('git_diff', { workspaceId }),
@@ -56,6 +69,6 @@ export async function getTransport(): Promise<ClientTransport> {
   if (isTauri()) return desktop;
   if (browserPreview) return (await import('./preview')).preview;
   throw new Error(
-    'Open this application through Tauri with npm run dev. Browser preview is available only in development with ?preview=1.',
+    'Запустите установленное приложение BebekonCode. Для разработки используйте npm run dev; браузерный предпросмотр доступен только с ?preview=1.',
   );
 }

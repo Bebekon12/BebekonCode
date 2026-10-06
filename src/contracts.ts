@@ -40,8 +40,62 @@ export type EventPayload =
   | { type: 'turn_started'; prompt: string }
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'tool_activity'; label: string; detail: string }
+  | {
+      type: 'approval_requested';
+      id: string;
+      kind: string;
+      title: string;
+      detail: string;
+      cwd: string | null;
+      reason: string | null;
+    }
+  | { type: 'approval_resolved'; id: string; decision: string }
   | { type: 'turn_completed' | 'session_stopped' }
-  | { type: 'provider_error'; message: string };
+  | { type: 'provider_error'; message: string; kind?: string | null };
+export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny';
+export interface UsageWindow {
+  window_minutes: number | null;
+  used_percent: number;
+  resets_at: number | null;
+  source: string;
+}
+export interface AccountStatus {
+  account_id: string;
+  state: 'signed_in' | 'signed_out' | 'not_required' | 'unavailable' | 'error';
+  email: string | null;
+  plan: string | null;
+  usage: UsageWindow[];
+  limit_reached: string | null;
+  credits: string | null;
+  message: string | null;
+  manage_usage_url: string | null;
+  plan_usage_enabled: boolean | null;
+  checked_at: number;
+}
+export interface AccountEvent {
+  account_id: string;
+  kind: 'login_completed' | 'login_failed' | 'updated' | 'usage' | 'notice';
+  status: AccountStatus | null;
+  message: string | null;
+}
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  is_default: boolean;
+}
+export interface ExtensionItem {
+  name: string;
+  detail: string | null;
+  enabled: boolean;
+  status: string | null;
+}
+export interface Extensions {
+  plugins: ExtensionItem[];
+  mcp_servers: ExtensionItem[];
+  skills: ExtensionItem[];
+  errors: string[];
+}
 export interface AgentEvent {
   sequence: number;
   session_id: string;
@@ -97,6 +151,17 @@ export interface ClientTransport {
   events(sessionId: string, before?: number): Promise<AgentEvent[]>;
   subscribe(onEvent: (event: AgentEvent) => void, onResync: () => void): Promise<() => void>;
   refreshProviders(): Promise<ProviderInfo[]>;
+  addAccount(provider: string, label: string): Promise<AccountProfile>;
+  renameAccount(accountId: string, label: string): Promise<AccountProfile>;
+  removeAccount(accountId: string): Promise<void>;
+  accountStatus(accountId: string): Promise<AccountStatus>;
+  accountLogin(accountId: string): Promise<void>;
+  accountLogout(accountId: string): Promise<void>;
+  accountModels(accountId: string): Promise<ModelInfo[]>;
+  accountExtensions(accountId: string): Promise<Extensions>;
+  subscribeAccounts(onEvent: (event: AccountEvent) => void): Promise<() => void>;
+  resolveApproval(sessionId: string, approvalId: string, decision: ApprovalDecision): Promise<void>;
+  openUsage(provider: string): Promise<void>;
   saveSettings(settings: Settings): Promise<void>;
   gitStatus(workspaceId: string): Promise<GitStatus>;
   gitDiff(workspaceId: string): Promise<string>;
