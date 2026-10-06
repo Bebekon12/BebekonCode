@@ -13,3 +13,5 @@ Before changing provider behavior, check current official documentation and upda
 document. Validate with cargo fmt, cargo check, cargo test, cargo clippy -- -D warnings,
 npm run typecheck, npm test, npm run build. Keep Cargo.lock and package-lock.json committed.
 Do not publish an untested production claim. Releases must describe limitations and changes.
+Published migrations and version tags are immutable. Add a new migration or release instead of
+editing history. Pin GitHub Actions to resolved commit SHAs, not annotated tag-object SHAs.

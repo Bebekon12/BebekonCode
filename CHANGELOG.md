@@ -2,6 +2,17 @@
 
 Every release links to a version tag and includes the same reviewed notes in GitHub Releases.
 
+## 0.1.1 — 2026-10-06
+
+### Fixed
+
+- Pin the Tauri release action to the commit behind its annotated v1 tag, so the Windows release
+  workflow uses a full commit SHA.
+
+Includes the full local workspace development slice from 0.1.0 described below. Real OpenAI and
+Claude adapters, worktrees and automatic installation remain unavailable. No runtime behavior
+changes in this patch release.
+
 ## 0.1.0 — 2026-10-06
 
 Initial development slice. This release is not the complete production V1.
