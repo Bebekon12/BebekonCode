@@ -20,6 +20,8 @@ const child = spawn(binary, ['--data-dir', path.join(fixture, 'data')], {
   stdio: 'ignore',
   env: {
     ...process.env,
+    // Isolate appearance/preferences as well as the Rust database.
+    WEBVIEW2_USER_DATA_FOLDER: path.join(fixture, 'webview-profile'),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
   },
 });
@@ -56,6 +58,7 @@ try {
     await sleep(200);
   }
   assert(page, 'Native packaged page unavailable');
+  assert((await fs.stat(path.join(fixture, 'webview-profile'))).isDirectory());
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByText('BebekonCode', { exact: true }).first().waitFor();
@@ -171,7 +174,7 @@ try {
   await page.reload();
   // Legacy persisted title 'New session' is presented in Russian without a DB rewrite.
   await page.locator('.session-title', { hasText: /^Новый чат$/ }).waitFor();
-  await page.getByText('Ожидает задачи', { exact: true }).first().waitFor();
+  await page.getByRole('heading', { name: 'Над чем поработаем?', exact: true }).waitFor();
   assert.equal(await page.getByText('Local demo', { exact: true }).count(), 0);
   const composer = page.getByRole('textbox', { name: 'Сообщение агенту' });
   await composer.fill('Проверка русского интерфейса');
@@ -260,6 +263,18 @@ try {
     .first()
     .waitFor();
   await page.screenshot({ path: 'test-results/native-chats.png' });
+  const fontLoaded = await page.evaluate(async () => {
+    await document.fonts.load('17px Inter', 'Русский текст');
+    return [...document.fonts].some((font) => font.family === 'Inter' && font.status === 'loaded');
+  });
+  assert(fontLoaded, 'Bundled Cyrillic font did not load in the packaged desktop');
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await page.getByLabel('Тема оформления').selectOption('light');
+  await page.getByLabel('Размер текста').selectOption('large');
+  await page.keyboard.press('Escape');
+  assert.equal(await composer.evaluate((element) => getComputedStyle(element).fontSize), '19px');
+  await page.screenshot({ path: 'test-results/native-readable-light.png' });
+  console.log('PASS: bundled Inter, light theme and large text in the packaged Windows app');
   console.log(
     'PASS: native chat without project, configuration, parallel demo contexts, handoff and persisted history',
   );

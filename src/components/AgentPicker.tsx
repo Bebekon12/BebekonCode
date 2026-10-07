@@ -160,7 +160,7 @@ export function AgentPicker({
             {loading && <option value={value.model}>Загрузка моделей…</option>}
             {models.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.name}
+                {value.provider === 'mock' ? 'Локальное демо' : m.name}
               </option>
             ))}
           </select>

@@ -53,8 +53,6 @@ export function Timeline({
   events,
   session,
   providerName,
-  account,
-  permissions,
   loadOlder,
   openFiles,
   openTerminal,
@@ -67,8 +65,6 @@ export function Timeline({
   events: AgentEvent[];
   session: Session;
   providerName: string;
-  account: string;
-  permissions: string;
   loadOlder: () => void;
   openFiles: () => void;
   openTerminal: () => void;
@@ -106,7 +102,8 @@ export function Timeline({
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useEffect(() => {
-    if (follow.current) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+    if (follow.current)
+      scroll.current?.scrollTo({ top: events.length ? scroll.current.scrollHeight : 0 });
   }, [events]);
   useEffect(() => {
     follow.current = true;
@@ -198,25 +195,15 @@ export function Timeline({
             </li>
           )}
           {overview && !turns.length && (
-            <Step
-              state="ready"
-              title="Над чем будем работать?"
-              subtitle={
-                demo ? 'Локальный симулятор готов к работе' : 'Агент подключён и готов к работе'
-              }
-              time={session.created_at}
-            >
-              <div className="step-agent-row">
-                <span className="step-agent-avatar">
-                  <Sparkles size={14} />
-                </span>
-                <strong>{providerName}</strong>
-                <span className="step-badge">Агент</span>
-                <span className="step-agent-meta">
-                  {session.model} · {account} · Разрешения: {permissions}
-                </span>
-              </div>
-            </Step>
+            <li className="chat-empty">
+              <h2>Над чем поработаем?</h2>
+              <p>Опишите задачу или задайте вопрос. Настройки агента — рядом с полем ввода.</p>
+              {demo && (
+                <p className="small muted">
+                  Сейчас включён локальный симулятор. Для ответов ИИ подключите аккаунт.
+                </p>
+              )}
+            </li>
           )}
           {turns.length > 0 && visibleTurns.length === 0 && (
             <li className="stepper-empty">Подходящих событий нет.</li>
@@ -246,7 +233,7 @@ export function Timeline({
               last={turn.id === turns[turns.length - 1]?.id}
             />
           ))}
-          {overview && (
+          {overview && (running || interrupted) && (
             <li className={`step step-tail ${running ? 'live' : ''}`}>
               <span className="step-marker" aria-hidden="true" />
               <div className="step-head">
@@ -309,6 +296,7 @@ function Step({
       <span className="step-marker" aria-hidden="true">
         <Icon size={15} className={state === 'running' ? 'spin' : undefined} />
       </span>
+      {open && children && <div className="step-body">{children}</div>}
       <div className="step-head">
         <div className="step-title">
           <strong title={title}>{title}</strong>
@@ -332,7 +320,6 @@ function Step({
           <span className="step-toggle-space" />
         )}
       </div>
-      {open && children && <div className="step-body">{children}</div>}
     </li>
   );
 }
@@ -434,7 +421,7 @@ function TurnStep({
           </span>
           <div>
             <div className="entry-label">
-              {providerName} <span className="muted">· {model}</span>
+              {providerName} {!demo && <span className="muted">· {model}</span>}
             </div>
             <div className="prose">
               {turn.text}

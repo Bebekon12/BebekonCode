@@ -1,18 +1,19 @@
 import {
-  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Cpu,
   Folder,
   FolderOpen,
   Home,
+  Info,
+  MessageSquare,
+  Network,
   Plus,
   Settings2,
-  ShieldCheck,
-  Sparkles,
+  UsersRound,
 } from 'lucide-react';
 import type { Session, Snapshot, Workspace } from '../contracts';
-import { accountLabel, displayPath, sessionTitle, statusLabels } from '../locale';
+import { displayPath, sessionTitle } from '../locale';
 
 export function Sidebar({
   data,
@@ -58,7 +59,6 @@ export function Sidebar({
       enabled: !!data,
     },
     { label: 'Файлы проекта', icon: FolderOpen, action: openFiles, enabled: !!workspace },
-    { label: 'Настройки', icon: Settings2, action: () => showSettings(), enabled: !!data },
   ];
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="Проекты и чаты">
@@ -70,7 +70,6 @@ export function Sidebar({
       >
         <Plus size={18} />
         <span className="sidebar-label">Новый чат</span>
-        <ChevronRight size={16} className="sidebar-label" />
       </button>
       <nav className="primary-nav" aria-label="Навигация">
         {nav.map(({ label, icon: Icon, action, active, enabled }) => (
@@ -87,7 +86,7 @@ export function Sidebar({
         ))}
       </nav>
       <div className="sidebar-heading sidebar-label">
-        <span>ЧАТЫ</span>
+        <span>Чаты</span>
       </div>
       <div className="workspace-list">
         {data?.sessions
@@ -99,22 +98,23 @@ export function Sidebar({
               onClick={() => selectSession(item)}
               title={sessionTitle(item.title)}
             >
-              <Sparkles size={15} />
+              {item.chat_mode === 'team' ? (
+                <UsersRound size={18} />
+              ) : item.chat_mode === 'auto' ? (
+                <Network size={18} />
+              ) : (
+                <MessageSquare size={18} />
+              )}
               <span className="session-copy sidebar-label">
                 <span className="session-title">{sessionTitle(item.title)}</span>
-                <span className="session-meta">
-                  {item.chat_mode === 'team'
-                    ? 'Команда'
-                    : item.chat_mode === 'auto'
-                      ? 'Авторазбиение'
-                      : item.model}
-                </span>
               </span>
-              <span className={`status-dot ${item.status}`} />
+              {(item.status === 'running' || item.status === 'failed') && (
+                <span className={`status-dot ${item.status}`} />
+              )}
             </button>
           ))}
         <div className="sidebar-heading sidebar-label">
-          <span>ПРОЕКТЫ</span>
+          <span>Проекты</span>
         </div>
         {data?.workspaces
           .filter((w) => w.id !== 'chat-scratch')
@@ -137,31 +137,6 @@ export function Sidebar({
                 </button>
                 {current && !collapsed && !sessions.length && (
                   <div className="project-sessions">
-                    {sessions.map((item) => (
-                      <button
-                        className={`session-button ${sessionId === item.id ? 'selected' : ''}`}
-                        key={item.id}
-                        onClick={() => selectSession(item)}
-                        title={sessionTitle(item.title)}
-                      >
-                        <span
-                          className={`status-dot ${item.status}`}
-                          role="img"
-                          aria-label={statusLabels[item.status]}
-                        />
-                        <span className="session-copy">
-                          <span className="session-title">{sessionTitle(item.title)}</span>
-                          <span className="session-meta">
-                            {item.model} ·{' '}
-                            {accountLabel(
-                              data.accounts.find(
-                                (account) => account.id === item.account_profile_id,
-                              ),
-                            )}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
                     {!sessions.length && (
                       <button className="project-new" onClick={() => startSession(project.id)}>
                         <Plus size={13} /> Новый чат
@@ -183,27 +158,25 @@ export function Sidebar({
         </button>
       </div>
       <div className="sidebar-bottom">
-        <div className="local-card sidebar-label">
-          <div className="local-card-title">
-            <ShieldCheck size={18} />
-            <strong>Локальный режим</strong>
-          </div>
-          <p>
-            История хранится на компьютере. Выбранный провайдер получает сообщения и рабочий
-            контекст.
-          </p>
-          <button
-            className="secondary-button"
-            onClick={() => showSettings('О программе и обновления')}
-            disabled={!data}
-          >
-            О программе и обновления
-          </button>
-        </div>
-        <div className="local-status sidebar-label">
-          <span className="status-dot completed" /> Локальное ядро
-          <span>{preview ? 'Предпросмотр' : 'Приложение'}</span>
-        </div>
+        <button
+          className="sidebar-footer-button"
+          onClick={() => showSettings()}
+          disabled={!data}
+          title={collapsed ? 'Настройки' : undefined}
+        >
+          <Settings2 size={19} />
+          <span className="sidebar-label">Настройки</span>
+        </button>
+        <button
+          className="sidebar-footer-button"
+          onClick={() => showSettings('О программе и обновления')}
+          disabled={!data}
+          title={collapsed ? 'О программе и обновления' : undefined}
+        >
+          <Info size={19} />
+          <span className="sidebar-label">О программе и обновления</span>
+        </button>
+        {preview && <span className="sidebar-preview sidebar-label">Предпросмотр</span>}
         <button
           className="collapse-button"
           onClick={toggleCollapsed}

@@ -5,7 +5,6 @@ import {
   PanelRightClose,
   Plus,
   Settings2,
-  ShieldCheck,
   Sparkles,
   Square,
   X,
@@ -29,14 +28,7 @@ import { PlanWelcome } from './components/PlanWelcome';
 import { ChatControls } from './components/ChatControls';
 import { ChatSettings } from './components/ChatSettings';
 import { modeLabels } from './chat';
-import {
-  accountLabel,
-  counted,
-  errorText,
-  permissionLabel,
-  sessionTitle,
-  statusLabels,
-} from './locale';
+import { accountLabel, counted, errorText, sessionTitle, statusLabels } from './locale';
 
 export function App() {
   const [client, setClient] = useState<ClientTransport | null>(null);
@@ -49,7 +41,16 @@ export function App() {
   const browsingHistory = useRef(historyPage);
   browsingHistory.current = historyPage;
   const [dialog, setDialog] = useState<'new' | 'settings' | 'commands' | 'files' | null>(null);
-  const [context, setContext] = useState(window.innerWidth > 1100);
+  const [context, setContext] = usePreference('context-visible', false);
+  const [theme, setTheme] = usePreference<'dark' | 'light'>('theme', 'dark');
+  const [textSize, setTextSize] = usePreference<'comfortable' | 'large'>(
+    'text-size',
+    'comfortable',
+  );
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.textSize = textSize === 'large' ? 'large' : 'comfortable';
+  }, [theme, textSize]);
   const [settingsTab, setSettingsTab] = useState('Основные');
   const [newSessionProvider, setNewSessionProvider] = useState<string>();
   const [agentDialog, setAgentDialog] = useState<{ id: string; handoff: boolean } | null>(null);
@@ -391,6 +392,7 @@ export function App() {
         addProject={client && !busy ? addProject : undefined}
         search={() => data && setDialog('commands')}
         toggleContext={() => setContext((value) => !value)}
+        contextVisible={context}
         onError={(error) => setError(errorText(error))}
       />
       <Sidebar
@@ -517,8 +519,6 @@ export function App() {
                 <Timeline
                   session={session}
                   providerName={providerName(session.provider)}
-                  account={accountLabel(account)}
-                  permissions={permissionLabel(session.permission_profile)}
                   openFiles={() => setDialog('files')}
                   openTerminal={openTerminal}
                   cancel={cancelCurrent}
@@ -601,14 +601,16 @@ export function App() {
             ) : (
               <div className="dashboard">
                 {hero}
-                <div className="dashboard-heading">
-                  <h2>
-                    {workspace && workspace.id !== 'chat-scratch'
-                      ? `Чаты · ${workspace.name}`
-                      : 'Ваши чаты'}
-                  </h2>
-                  <span>{counted(homeSessions.length, ['чат', 'чата', 'чатов'])}</span>
-                </div>
+                {homeSessions.length > 0 && (
+                  <div className="dashboard-heading">
+                    <h2>
+                      {workspace && workspace.id !== 'chat-scratch'
+                        ? `Чаты · ${workspace.name}`
+                        : 'Ваши чаты'}
+                    </h2>
+                    <span>{counted(homeSessions.length, ['чат', 'чата', 'чатов'])}</span>
+                  </div>
+                )}
                 {homeSessions.map((item) => (
                   <button
                     className="dashboard-session"
@@ -622,14 +624,15 @@ export function App() {
                       <strong>{sessionTitle(item.title)}</strong>
                       <small>
                         {data?.workspaces.find((project) => project.id === item.workspace_id)?.name}{' '}
-                        · {modeLabels[item.chat_mode]} · {item.model}
+                        · {modeLabels[item.chat_mode]} ·{' '}
+                        {item.provider === 'mock' ? 'Локальное демо' : item.model}
                       </small>
                     </span>
                     <span className={`step-pill ${item.status}`}>{statusLabels[item.status]}</span>
                     <ChevronRight size={17} />
                   </button>
                 ))}
-                {!homeSessions.length && (
+                {!homeSessions.length && !hero && (
                   <div className="getting-started">
                     <div className="agent-glyph">
                       <FolderPlus size={25} />
@@ -664,16 +667,6 @@ export function App() {
                     )}
                   </div>
                 )}
-                <div className="dashboard-note">
-                  <ShieldCheck size={18} />
-                  <div>
-                    <strong>Подключите свой аккаунт и начните разговор</strong>
-                    <p>
-                      Выберите обычный чат, команду или авторазбиение. Модель, рассуждение и доступ
-                      настраиваются в чате. История сохраняется на компьютере.
-                    </p>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -694,20 +687,6 @@ export function App() {
             />
           )}
         </div>
-        <footer className="statusbar">
-          <span>
-            <ShieldCheck size={11} />{' '}
-            {browserPreview ? 'Предпросмотр в памяти' : 'Локальная рабочая область'}
-          </span>
-          <span>
-            {counted(data?.sessions.filter((session) => session.status === 'running').length ?? 0, [
-              'активная сессия',
-              'активные сессии',
-              'активных сессий',
-            ])}{' '}
-            <span className="statusbar-separator">·</span> Без удалённого доступа
-          </span>
-        </footer>
       </main>
 
       {dialog === 'files' && client && workspace && (
@@ -745,6 +724,7 @@ export function App() {
       {dialog === 'settings' && data && client && (
         <Settings
           client={client}
+          appearance={{ theme, textSize, setTheme, setTextSize }}
           initialTab={settingsTab}
           settings={data.settings}
           providers={data.providers}

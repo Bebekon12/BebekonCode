@@ -18,6 +18,7 @@ import pkg from '../../package.json';
 import { errorText } from '../locale';
 export function Settings({
   client,
+  appearance,
   initialTab,
   settings,
   providers,
@@ -32,6 +33,12 @@ export function Settings({
   close,
 }: {
   client: ClientTransport;
+  appearance: {
+    theme: 'dark' | 'light';
+    textSize: 'comfortable' | 'large';
+    setTheme: (theme: 'dark' | 'light') => void;
+    setTextSize: (size: 'comfortable' | 'large') => void;
+  };
   initialTab?: string;
   settings: AppSettings;
   providers: ProviderInfo[];
@@ -112,9 +119,34 @@ export function Settings({
               <div className="setting-row">
                 <div>
                   <strong>Оформление</strong>
-                  <p>Тёмная графитовая тема · системные шрифты</p>
+                  <p>Спокойные цвета и локальный шрифт Inter.</p>
                 </div>
-                <span className="badge">Тёмная</span>
+                <select
+                  aria-label="Тема оформления"
+                  value={appearance.theme}
+                  onChange={(event) =>
+                    appearance.setTheme(event.target.value === 'light' ? 'light' : 'dark')
+                  }
+                >
+                  <option value="dark">Тёмная</option>
+                  <option value="light">Светлая</option>
+                </select>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>Размер текста</strong>
+                  <p>Текст переписки и элементы интерфейса.</p>
+                </div>
+                <select
+                  aria-label="Размер текста"
+                  value={appearance.textSize}
+                  onChange={(event) =>
+                    appearance.setTextSize(event.target.value === 'large' ? 'large' : 'comfortable')
+                  }
+                >
+                  <option value="comfortable">Комфортный</option>
+                  <option value="large">Крупный</option>
+                </select>
               </div>
               <div className="setting-row">
                 <div>

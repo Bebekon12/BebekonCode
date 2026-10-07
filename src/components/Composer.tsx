@@ -51,16 +51,17 @@ export const Composer = forwardRef<
               aria-label="Остановить агента"
               onClick={cancel}
             >
-              <Square size={14} />
+              <Square size={18} />
             </button>
           ) : (
             <button
               className="send-button"
               aria-label="Отправить сообщение"
+              title="Отправить сообщение (Ctrl+Enter)"
               disabled={!draft.trim() || busy}
               onClick={send}
             >
-              <ArrowUp size={17} />
+              <ArrowUp size={21} />
             </button>
           )}
         </div>
@@ -68,8 +69,8 @@ export const Composer = forwardRef<
       <div className="composer-caption">
         <span>
           {demo
-            ? 'Локальный симулятор · файлы проекта не читает и не меняет'
-            : 'Контекст сжимается Codex автоматически · смена провайдера через «Перейти»'}
+            ? 'Локальный симулятор · для ответов ИИ подключите аккаунт'
+            : 'Контекст сжимается автоматически'}
           {manageUsage && (
             <>
               {' · '}

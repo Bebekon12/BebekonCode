@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRightLeft, Puzzle, Settings2 } from 'lucide-react';
+import { ArrowRightLeft, Puzzle } from 'lucide-react';
 import type { AgentConfig, ClientTransport, ModelInfo, Session } from '../contracts';
 import { effortLabels, sessionConfig } from '../chat';
 import { errorText } from '../locale';
@@ -39,9 +39,10 @@ export function ChatControls({
     <div className="chat-controls">
       <div className="chat-control-fields">
         <label>
-          Модель
+          <span className="sr-only">Модель</span>
           <select
             aria-label="Модель в чате"
+            title="Модель"
             disabled={disabled || !models.length}
             value={session.model}
             onChange={(e) =>
@@ -55,38 +56,44 @@ export function ChatControls({
             {models.length ? (
               models.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name}
+                  {session.provider === 'mock' ? 'Локальное демо' : m.name}
                 </option>
               ))
             ) : (
-              <option>{session.model}</option>
+              <option value={session.model}>
+                {session.provider === 'mock' ? 'Локальное демо' : session.model}
+              </option>
             )}
           </select>
         </label>
-        <label>
-          Рассуждение
-          <select
-            aria-label="Рассуждение в чате"
-            disabled={disabled || !model?.reasoning_efforts?.length}
-            value={session.reasoning_effort ?? ''}
-            onChange={(e) =>
-              configure({ ...sessionConfig(session), reasoning_effort: e.target.value || null })
-            }
-          >
-            <option value="">
-              {model?.reasoning_efforts?.length ? 'По умолчанию' : 'Недоступно'}
-            </option>
-            {model?.reasoning_efforts?.map((e) => (
-              <option key={e} value={e}>
-                {effortLabels[e] ?? e}
+        {!!model?.reasoning_efforts?.length && (
+          <label>
+            <span className="sr-only">Рассуждение</span>
+            <select
+              aria-label="Рассуждение в чате"
+              title="Уровень рассуждения"
+              disabled={disabled || !model?.reasoning_efforts?.length}
+              value={session.reasoning_effort ?? ''}
+              onChange={(e) =>
+                configure({ ...sessionConfig(session), reasoning_effort: e.target.value || null })
+              }
+            >
+              <option value="">
+                {model?.reasoning_efforts?.length ? 'По умолчанию' : 'Недоступно'}
               </option>
-            ))}
-          </select>
-        </label>
+              {model?.reasoning_efforts?.map((e) => (
+                <option key={e} value={e}>
+                  {effortLabels[e] ?? e}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
-          Доступ
+          <span className="sr-only">Доступ</span>
           <select
             aria-label="Доступ в чате"
+            title="Доступ агента"
             value={session.permission_profile}
             disabled={disabled || !!session.parent_session_id}
             onChange={(e) =>
@@ -110,15 +117,6 @@ export function ChatControls({
             <ArrowRightLeft size={14} /> Перейти
           </button>
         )}
-        <button
-          className="icon-button"
-          aria-label="Настройки агента"
-          title="Настройки агента"
-          onClick={settings}
-          disabled={disabled}
-        >
-          <Settings2 size={16} />
-        </button>
       </div>
       {error && <p className="field-error">{error}</p>}
     </div>

@@ -1,4 +1,4 @@
-import { Folder, Minus, PanelRightClose, Plus, Search, ShieldCheck, Square, X } from 'lucide-react';
+import { Folder, Minus, PanelRightClose, Plus, Search, Square, X } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Workspace } from '../contracts';
@@ -13,6 +13,7 @@ export function Titlebar({
   addProject,
   search,
   toggleContext,
+  contextVisible,
   onError,
 }: {
   tabs: Workspace[];
@@ -22,6 +23,7 @@ export function Titlebar({
   addProject?: () => void;
   search: () => void;
   toggleContext: () => void;
+  contextVisible: boolean;
   onError: (error: unknown) => void;
 }) {
   const windowAction = (action: 'minimize' | 'toggleMaximize' | 'close') => {
@@ -70,16 +72,15 @@ export function Titlebar({
       <div className="titlebar-space" data-tauri-drag-region />
       <button className="global-search" onClick={search}>
         <Search size={15} />
-        <span>Поиск по проектам, чатам, командам…</span>
+        <span>Поиск</span>
         <kbd>Ctrl + K</kbd>
       </button>
       <div className="titlebar-space" data-tauri-drag-region />
-      <span className="local-badge" title="Данные и история хранятся только на этом компьютере">
-        <ShieldCheck size={14} /> Локально
-      </span>
       <button
         className="icon-button"
         aria-label="Показать или скрыть контекст"
+        title={contextVisible ? 'Скрыть панель проекта' : 'Показать панель проекта'}
+        aria-pressed={contextVisible}
         onClick={toggleContext}
       >
         <PanelRightClose size={17} />
