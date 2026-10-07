@@ -1,6 +1,6 @@
 // Native WebView2 IPC + UI checks. Only this test process enables loopback CDP.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +13,8 @@ const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'bebekon-native-'));
 const project = path.join(fixture, 'проект с пробелами');
 await fs.mkdir(project);
 await fs.writeFile(path.join(project, 'hello.txt'), 'Hello from the real disk.\r\n');
-await fs.mkdir(path.join(project, '.git'));
+execFileSync('git', ['init', '--quiet'], { cwd: project, windowsHide: true, stdio: 'pipe' });
+execFileSync('git', ['add', 'hello.txt'], { cwd: project, windowsHide: true, stdio: 'pipe' });
 const port = 9237;
 const child = spawn(binary, ['--data-dir', path.join(fixture, 'data')], {
   windowsHide: true,
@@ -158,6 +159,11 @@ try {
   await page.screenshot({ path: 'test-results/native-files.png' });
   await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
   // The published SQL seed/defaults stay unchanged; old built-in labels localize on display.
+  await page.getByRole('button', { name: 'Изменения', exact: true }).click();
+  const changes = page.getByRole('dialog', { name: 'Изменения проекта' });
+  await changes.getByText('hello.txt', { exact: true }).waitFor();
+  await expect(changes.locator('.changes-diff')).toContainText('External writer');
+  await changes.getByRole('button', { name: 'Закрыть окно', exact: true }).click();
   await page.evaluate(
     (workspaceId) =>
       window.__TAURI_INTERNALS__.invoke('create_session', {
@@ -263,6 +269,87 @@ try {
     .first()
     .waitFor();
   await page.screenshot({ path: 'test-results/native-chats.png' });
+  // The team result is the real coordinator output; worker results stay in separate contexts.
+  const team = await page.evaluate(
+    (args) =>
+      window.__TAURI_INTERNALS__.invoke('create_chat', {
+        input: {
+          workspace_id: args.workspaceId,
+          mode: 'team',
+          agents: [
+            { ...args.agent, role: 'Координатор' },
+            { ...args.agent, permission_profile: 'read_only', role: 'Аналитик' },
+          ],
+        },
+      }),
+    { workspaceId: workspace.id, agent },
+  );
+  await page.evaluate(
+    (id) =>
+      window.__TAURI_INTERNALS__.invoke('send_message', {
+        sessionId: id,
+        prompt: 'Подготовьте общий итог по проекту',
+      }),
+    team.id,
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (id) => {
+          const snapshot = await window.__TAURI_INTERNALS__.invoke('snapshot');
+          return snapshot.sessions.find((s) => s.id === id)?.status;
+        }, team.id),
+      { timeout: 30_000 },
+    )
+    .toBe('completed');
+  await page.reload();
+  await page
+    .locator('.recent-chat')
+    .filter({ hasText: 'Подготовьте общий итог по проекту' })
+    .click();
+  await expect(page.locator('.step-message.agent')).toHaveCount(1);
+  await expect(page.locator('.step-message.agent .entry-label')).toHaveText('Ответ команды');
+  await expect(page.locator('.team-panel')).not.toHaveAttribute('open');
+  const userBox = await page.locator('.step-message:not(.agent)').boundingBox();
+  const answerBox = await page.locator('.step-message.agent').boundingBox();
+  assert(userBox.x > answerBox.x + 80, 'User bubble is not aligned to the right');
+  assert(answerBox.width > 900, 'Packaged chat remained narrow');
+  await page.screenshot({ path: 'test-results/native-workspace-team.png' });
+  const timelineBefore = await page.locator('.chat-timeline').boundingBox();
+  await page.locator('.team-panel > summary').click();
+  await expect(page.locator('.team-member')).toHaveCount(2);
+  const timelineAfter = await page.locator('.chat-timeline').boundingBox();
+  assert.equal(timelineAfter.height, timelineBefore.height);
+  await page.locator('.team-task-details > summary').click();
+  await expect(page.locator('.team-task-row')).toHaveCount(1);
+  await page.locator('.team-task-row').click();
+  await page.getByRole('button', { name: '← Вернуться в основной чат', exact: true }).click();
+  await expect(page.locator('.step-message.agent .entry-label')).toHaveText('Ответ команды');
+  await page
+    .getByRole('button', { name: 'Свернуть проект проект с пробелами', exact: true })
+    .click();
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Развернуть проект проект с пробелами', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await expect(
+    page
+      .getByRole('region', { name: 'Проект проект с пробелами', exact: true })
+      .locator('.recent-chat'),
+  ).toHaveCount(0);
+  await page
+    .getByRole('button', { name: 'Развернуть проект проект с пробелами', exact: true })
+    .click();
+  await page
+    .locator('.recent-chat')
+    .filter({ hasText: 'Подготовьте общий итог по проекту' })
+    .click();
+  await page.getByRole('button', { name: 'Плагины', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Плагины и инструменты' }).waitFor();
+  await page.keyboard.press('Escape');
+  console.log(
+    'PASS: real Git diff, grouped project chats, single team result, right-aligned user messages and optional team details',
+  );
   const fontLoaded = await page.evaluate(async () => {
     await document.fonts.load('17px Inter', 'Русский текст');
     return [...document.fonts].some((font) => font.family === 'Inter' && font.status === 'loaded');

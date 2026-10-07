@@ -18,6 +18,7 @@ export function AgentPicker({
   change,
   lockedAccount = false,
   worker = false,
+  initialToolsOpen = false,
 }: {
   client: ClientTransport;
   data: Snapshot;
@@ -25,11 +26,12 @@ export function AgentPicker({
   change: (value: AgentConfig) => void;
   lockedAccount?: boolean;
   worker?: boolean;
+  initialToolsOpen?: boolean;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(initialToolsOpen);
   const [extensions, setExtensions] = useState<Extensions>();
   const [toolsError, setToolsError] = useState('');
   const current = useRef({ value, change });

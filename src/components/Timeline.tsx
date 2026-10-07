@@ -75,6 +75,8 @@ export function Timeline({
   manageUsage?: () => void;
 }) {
   const demo = session.provider === 'mock';
+  const team =
+    !session.parent_session_id && (session.chat_mode === 'team' || session.chat_mode === 'auto');
   const turns = useMemo(
     () =>
       buildTimeline(events).map((turn) =>
@@ -126,6 +128,7 @@ export function Timeline({
       <div className="chat-history-switch">
         <button
           className="text-button"
+          aria-label="Поиск и фильтры истории"
           aria-expanded={showDetails}
           onClick={() => {
             setShowDetails(!showDetails);
@@ -133,7 +136,8 @@ export function Timeline({
           }}
         >
           {' '}
-          {showDetails ? 'Скрыть фильтры' : 'Поиск и фильтры истории'} <ChevronDown size={12} />
+          <Search size={14} /> {showDetails ? 'Скрыть фильтры' : 'История'}{' '}
+          <ChevronDown size={12} />
         </button>
       </div>
       {showDetails && (
@@ -197,7 +201,11 @@ export function Timeline({
           {overview && !turns.length && (
             <li className="chat-empty">
               <h2>Над чем поработаем?</h2>
-              <p>Опишите задачу или задайте вопрос. Настройки агента — рядом с полем ввода.</p>
+              <p>
+                {team
+                  ? 'Опишите задачу. Команда подготовит один общий ответ; результаты участников доступны в меню команды.'
+                  : 'Опишите задачу или задайте вопрос. Настройки агента — рядом с полем ввода.'}
+              </p>
               {demo && (
                 <p className="small muted">
                   Сейчас включён локальный симулятор. Для ответов ИИ подключите аккаунт.
@@ -214,6 +222,7 @@ export function Timeline({
               turn={turn}
               filter={filter}
               demo={demo}
+              team={team}
               providerName={
                 turn.provider
                   ? ({ openai: 'OpenAI / Codex', mock: 'Локальное демо', anthropic: 'Claude Code' }[
@@ -240,7 +249,9 @@ export function Timeline({
                 <div className="step-title">
                   <strong>
                     {running
-                      ? 'Агент работает…'
+                      ? team
+                        ? 'Команда работает…'
+                        : 'Агент работает…'
                       : turns.length
                         ? 'Сессия продолжается…'
                         : 'Над чем будем работать?'}
@@ -249,7 +260,9 @@ export function Timeline({
                     {running && waitingApproval
                       ? 'Ожидает вашего решения по запросу выше'
                       : running
-                        ? 'Ответ появляется в реальном времени'
+                        ? team
+                          ? 'Участники выполняют задачу; здесь появится общий итог.'
+                          : 'Ответ появляется в реальном времени'
                         : interrupted
                           ? 'Предыдущий запуск прерван при остановке ядра. История сохранена — отправьте новое сообщение, чтобы продолжить.'
                           : turns.length
@@ -296,7 +309,7 @@ function Step({
       <span className="step-marker" aria-hidden="true">
         <Icon size={15} className={state === 'running' ? 'spin' : undefined} />
       </span>
-      {open && children && <div className="step-body">{children}</div>}
+      {children && <div className="step-body">{children}</div>}
       <div className="step-head">
         <div className="step-title">
           <strong title={title}>{title}</strong>
@@ -328,6 +341,7 @@ function TurnStep({
   turn,
   filter,
   demo,
+  team,
   providerName,
   model,
   interrupted,
@@ -343,6 +357,7 @@ function TurnStep({
   turn: TimelineTurn;
   filter: TimelineFilter;
   demo: boolean;
+  team: boolean;
   providerName: string;
   model: string;
   interrupted: boolean;
@@ -360,7 +375,7 @@ function TurnStep({
   const subtitle: Record<StepState, string> = {
     ready: '',
     idle: 'Ожидает',
-    running: 'Агент отвечает…',
+    running: team ? 'Команда готовит общий ответ…' : 'Агент отвечает…',
     completed: `Ответ завершён${elapsed}`,
     stopped: `Остановлено вами${elapsed}`,
     failed: `Ошибка провайдера${elapsed}`,
@@ -386,9 +401,11 @@ function TurnStep({
           </div>
         </div>
       )}
-      {filter !== 'agent' && turn.activities.length > 0 && (
+      {open && filter !== 'agent' && turn.activities.length > 0 && (
         <details className="chat-activity-details" open={filter === 'tools' ? true : undefined}>
-          <summary>Действия агента · {turn.activities.length}</summary>
+          <summary>
+            {team ? 'Работа команды' : 'Действия агента'} · {turn.activities.length}
+          </summary>
           <ul className="activity-table" aria-label="Действия инструментов">
             {turn.activities.map((activity, index) => (
               <li key={`${turn.id}-${index}`}>
@@ -414,14 +431,27 @@ function TurnStep({
             resolve={(decision) => resolveApproval(approval.id, decision)}
           />
         ))}
-      {filter !== 'tools' && (turn.text || turn.status === 'running') && (
+      {open && team && !turn.text && turn.status === 'running' && live && filter !== 'tools' && (
+        <div className="team-progress" role="status">
+          <LoaderCircle size={17} className="spin" />
+          <span>
+            {turn.activities.some((activity) => activity.label === 'Сборка результата')
+              ? 'Собираем общий ответ…'
+              : turn.activities.some((activity) => activity.label === 'Обсуждение в команде')
+                ? 'Участники проверяют результаты…'
+                : 'Команда выполняет задачу…'}
+          </span>
+        </div>
+      )}
+      {open && filter !== 'tools' && (turn.text || (!team && turn.status === 'running')) && (
         <div className="step-message agent">
           <span className="step-message-avatar">
             <Sparkles size={13} />
           </span>
           <div>
             <div className="entry-label">
-              {providerName} {!demo && <span className="muted">· {model}</span>}
+              {team ? 'Ответ команды' : providerName}{' '}
+              {!team && !demo && <span className="muted">· {model}</span>}
             </div>
             <div className="prose">
               {turn.text}

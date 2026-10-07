@@ -11,8 +11,8 @@ test('create an ordinary chat without a project and change its access and tools'
     'aria-pressed',
     'true',
   );
-  await wizard.getByRole('button', { name: 'Создать чат' }).click();
-  await expect(page.locator('.chat-title')).toContainText('без проекта');
+  await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
+  await expect(page.locator('.chat-title')).toContainText('Без проекта');
   await expect(page.getByRole('tab')).toHaveCount(0);
   await page.getByLabel('Доступ в чате').selectOption('read_only');
   await expect(page.getByLabel('Доступ в чате')).toHaveValue('read_only');
@@ -45,8 +45,9 @@ test('team creation exposes independent participant settings and auto mode', asy
   await expect(wizard.getByLabel('Доступ', { exact: true }).nth(1)).toBeDisabled();
   await wizard.getByLabel('Роль', { exact: true }).nth(1).fill('Архитектор');
   await page.screenshot({ path: 'test-results/team-creation.png' });
-  await wizard.getByRole('button', { name: 'Создать чат' }).click();
+  await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await expect(page.locator('.chat-title')).toContainText('Команда агентов');
+  await page.locator('.team-panel > summary').click();
   await page.getByRole('button', { name: 'Настроить Архитектор', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: 'Настройки агента' }).getByLabel('Роль', { exact: true }),
@@ -54,7 +55,7 @@ test('team creation exposes independent participant settings and auto mode', asy
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+n');
   await page.getByRole('button', { name: /Авторазбиение ИИ/ }).click();
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await expect(page.locator('.chat-title')).toContainText('Авторазбиение');
 });
 
@@ -72,7 +73,7 @@ test('reasoning and handoff remain in the same chat', async ({ page }) => {
   await page.keyboard.press('Escape');
   await page.locator('.new-session-button').click();
   await expect(page.getByLabel('Провайдер', { exact: true })).toHaveValue('openai');
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByLabel('Рассуждение в чате').selectOption('high');
   await expect(page.getByLabel('Рассуждение в чате')).toHaveValue('high');
   const chats = await page.locator('.recent-chat').count();

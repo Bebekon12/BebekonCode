@@ -4,15 +4,15 @@ test('project, session, streaming, stop and keyboard commands', async ({ page })
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/?preview=1');
-  await expect(page.locator('.add-project')).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Добавить проект', exact: true })).toBeEnabled();
   await page.screenshot({ path: 'test-results/overview.png', fullPage: true });
-  await page.locator('.add-project').click();
+  await page.getByRole('button', { name: 'Добавить проект', exact: true }).click();
   await page.locator('.new-session-button').click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(
     page.getByLabel('Провайдер', { exact: true }).locator('option[value="anthropic"]'),
   ).toHaveAttribute('disabled', '');
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'Сообщение агенту' })
     .fill('Design a safe provider boundary');
@@ -51,13 +51,13 @@ test('project, session, streaming, stop and keyboard commands', async ({ page })
 
 test('multiple sessions retain separate timelines', async ({ page }) => {
   await page.goto('/?preview=1');
-  await page.locator('.add-project').click();
+  await page.getByRole('button', { name: 'Добавить проект', exact: true }).click();
   await page.keyboard.press('Control+n');
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).fill('First independent task');
   await page.getByRole('button', { name: 'Отправить сообщение' }).click();
   await page.keyboard.press('Control+n');
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).fill('Second independent task');
   await page.getByRole('button', { name: 'Отправить сообщение' }).click();
   await page.getByRole('button', { name: 'Остановить агента' }).click();
@@ -73,7 +73,7 @@ test('multiple sessions retain separate timelines', async ({ page }) => {
 test('layout remains contained at Windows 150% logical resolution', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 640 });
   await page.goto('/?preview=1');
-  await expect(page.locator('.add-project')).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Добавить проект', exact: true })).toBeEnabled();
   const dimensions = await page.evaluate(() => ({
     width: document.documentElement.scrollWidth,
     viewport: innerWidth,
@@ -84,7 +84,7 @@ test('layout remains contained at Windows 150% logical resolution', async ({ pag
 
 test('project tabs and layout preferences survive a reload', async ({ page }) => {
   await page.goto('/?preview=1');
-  await page.locator('.add-project').click();
+  await page.getByRole('button', { name: 'Добавить проект', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'sample-project' })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -92,7 +92,7 @@ test('project tabs and layout preferences survive a reload', async ({ page }) =>
   await page.getByRole('button', { name: 'Закрыть вкладку sample-project' }).click();
   await expect(page.getByRole('tab')).toHaveCount(0);
   // Closing a tab keeps the project in the sidebar.
-  await page.getByRole('button', { name: 'sample-project' }).click();
+  await page.getByRole('button', { name: 'sample-project', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'sample-project' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Скрыть приветствие' }).click();
@@ -107,7 +107,7 @@ test('project tabs and layout preferences survive a reload', async ({ page }) =>
 
 test('codex account sign-in, usage limits and command approval', async ({ page }) => {
   await page.goto('/?preview=1');
-  await page.locator('.add-project').click();
+  await page.getByRole('button', { name: 'Добавить проект', exact: true }).click();
   await page.getByRole('button', { name: 'Аккаунты', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить аккаунт ChatGPT' }).click();
   await page.getByRole('textbox', { name: 'Название аккаунта' }).fill('Личный');
@@ -132,7 +132,7 @@ test('codex account sign-in, usage limits and command approval', async ({ page }
   await page.getByLabel('Провайдер', { exact: true }).selectOption('openai');
   await expect(page.getByLabel('Аккаунт', { exact: true })).toHaveValue(/.+/);
   await expect(page.getByLabel('Модель', { exact: true })).toHaveValue('preview-model');
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Сообщение агенту' });
   await composer.fill('Запусти тесты');
   await composer.press('Control+Enter');

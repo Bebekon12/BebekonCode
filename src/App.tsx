@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronRight,
+  FileCode2,
   FolderPlus,
+  GitBranch,
   PanelRightClose,
   Plus,
   Settings2,
   Sparkles,
   Square,
+  Terminal,
   X,
 } from 'lucide-react';
-import type { AgentEvent, ClientTransport, ReleaseCheck, Session, Snapshot } from './contracts';
+import type {
+  AgentEvent,
+  ClientTransport,
+  CreateChat,
+  ReleaseCheck,
+  Session,
+  Snapshot,
+} from './contracts';
 import { browserPreview, getTransport } from './transport';
 import { eventStatus, mergeEvents } from './timeline';
 import { usePreference } from './preferences';
@@ -27,8 +37,11 @@ import { CommandPalette } from './components/CommandPalette';
 import { PlanWelcome } from './components/PlanWelcome';
 import { ChatControls } from './components/ChatControls';
 import { ChatSettings } from './components/ChatSettings';
+import { TeamPanel } from './components/TeamPanel';
+import { ProjectChanges } from './components/ProjectChanges';
+import { ExtensionsDialog } from './components/ExtensionsDialog';
 import { modeLabels } from './chat';
-import { accountLabel, counted, errorText, sessionTitle, statusLabels } from './locale';
+import { counted, errorText, sessionTitle, statusLabels } from './locale';
 
 export function App() {
   const [client, setClient] = useState<ClientTransport | null>(null);
@@ -40,7 +53,11 @@ export function App() {
   const [historyPage, setHistoryPage] = useState(false);
   const browsingHistory = useRef(historyPage);
   browsingHistory.current = historyPage;
-  const [dialog, setDialog] = useState<'new' | 'settings' | 'commands' | 'files' | null>(null);
+  const [dialog, setDialog] = useState<
+    'new' | 'settings' | 'commands' | 'files' | 'changes' | 'plugins' | null
+  >(null);
+  const [newChatMode, setNewChatMode] = useState<CreateChat['mode']>('single');
+  const [newChatProject, setNewChatProject] = useState('');
   const [context, setContext] = usePreference('context-visible', false);
   const [theme, setTheme] = usePreference<'dark' | 'light'>('theme', 'dark');
   const [textSize, setTextSize] = usePreference<'comfortable' | 'large'>(
@@ -53,7 +70,11 @@ export function App() {
   }, [theme, textSize]);
   const [settingsTab, setSettingsTab] = useState('Основные');
   const [newSessionProvider, setNewSessionProvider] = useState<string>();
-  const [agentDialog, setAgentDialog] = useState<{ id: string; handoff: boolean } | null>(null);
+  const [agentDialog, setAgentDialog] = useState<{
+    id: string;
+    handoff: boolean;
+    tools?: boolean;
+  } | null>(null);
   const showSettings = (tab = 'Основные') => {
     setSettingsTab(tab);
     setDialog('settings');
@@ -316,6 +337,13 @@ export function App() {
     setProjectId(session.workspace_id);
   };
   const newSession = () => {
+    setNewChatMode('single');
+    setNewChatProject(projectId);
+    setDialog('new');
+  };
+  const openNewChat = (mode: CreateChat['mode'], project: string) => {
+    setNewChatMode(mode);
+    setNewChatProject(project);
     setDialog('new');
   };
   const send = () => {
@@ -343,12 +371,16 @@ export function App() {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
-        if (dataRef.current) setDialog('new');
+        if (dataRef.current) {
+          setNewChatMode('single');
+          setNewChatProject(projectId);
+          setDialog('new');
+        }
       }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [dialog, updateBusy]);
+  }, [dialog, updateBusy, projectId]);
 
   const providerName = (id?: string) =>
     data?.providers.find((provider) => provider.id === id)?.name ?? id ?? '';
@@ -381,6 +413,39 @@ export function App() {
       disabled={busy || !client}
     />
   );
+  const projectTools = (
+    <div className="workspace-actions" role="toolbar" aria-label="Инструменты проекта">
+      <button
+        className="text-button"
+        aria-label="Файлы проекта"
+        disabled={!workspace}
+        onClick={() => setDialog('files')}
+        title="Открыть файлы проекта"
+      >
+        <FileCode2 size={17} />
+        <span>Файлы</span>
+      </button>
+      <button
+        className="text-button"
+        aria-label="Терминал"
+        disabled={!workspace}
+        onClick={openTerminal}
+        title="Открыть PowerShell в папке проекта"
+      >
+        <Terminal size={17} />
+        <span>Терминал</span>
+      </button>
+      <button
+        className="text-button"
+        aria-label="Изменения"
+        disabled={!workspace}
+        onClick={() => setDialog('changes')}
+      >
+        <GitBranch size={17} />
+        <span>Изменения</span>
+      </button>
+    </div>
+  );
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -404,15 +469,16 @@ export function App() {
         disabled={busy || !client}
         toggleCollapsed={() => setSidebarCollapsed((value) => !value)}
         newSession={newSession}
+        createChat={(mode) => openNewChat(mode, '')}
         addProject={addProject}
         goHome={() => setSessionId('')}
         showSettings={showSettings}
-        openFiles={() => client && workspace && setDialog('files')}
+        search={() => setDialog('commands')}
+        openPlugins={() => setDialog('plugins')}
         selectProject={selectProject}
         selectSession={selectSession}
         startSession={(id) => {
-          setProjectId(id);
-          setDialog('new');
+          openNewChat('single', id);
         }}
         preview={browserPreview}
       />
@@ -450,12 +516,16 @@ export function App() {
             {session ? (
               <>
                 <div className="chat-title chat-titlebar">
-                  <strong>{sessionTitle(session.title)}</strong>
-                  <span>
-                    {modeLabels[session.chat_mode]}
-                    {session.workspace_id === 'chat-scratch' ? ' · без проекта' : ''} ·{' '}
-                    {accountLabel(account)}
-                  </span>
+                  <div className="chat-heading-copy">
+                    <strong>{sessionTitle(session.title)}</strong>
+                    <span className="chat-mode-label">
+                      {modeLabels[session.chat_mode]} ·{' '}
+                      <span className="chat-breadcrumb">
+                        {session.workspace_id === 'chat-scratch' ? 'Без проекта' : workspace?.name}
+                      </span>
+                    </span>
+                  </div>
+                  {projectTools}
                 </div>
                 {session.parent_session_id && (
                   <div className="chat-branches">
@@ -473,30 +543,13 @@ export function App() {
                     <span>Отдельный контекст · общая задача</span>
                   </div>
                 )}
-                {session.chat_mode !== 'single' && session.chat_mode !== 'task' && (
-                  <div className="chat-branches" aria-label="Участники и подзадачи">
-                    {data?.sessions
-                      .filter((s) => s.parent_session_id === session.id)
-                      .map((s) => (
-                        <span className="branch-chip" key={s.id}>
-                          <button onClick={() => selectSession(s)} title={s.model}>
-                            {s.chat_mode === 'task' ? 'Подзадача' : 'Участник'}:{' '}
-                            {s.title || s.role || s.model}
-                            <span className={`status-dot ${s.status}`} />
-                          </button>
-                          {s.chat_mode !== 'task' && (
-                            <button
-                              className="icon-button"
-                              aria-label={`Настроить ${s.role || s.model}`}
-                              disabled={running}
-                              onClick={() => setAgentDialog({ id: s.id, handoff: false })}
-                            >
-                              <Settings2 size={13} />
-                            </button>
-                          )}
-                        </span>
-                      ))}
-                  </div>
+                {(session.chat_mode === 'team' || session.chat_mode === 'auto') && data && (
+                  <TeamPanel
+                    session={session}
+                    sessions={data.sessions}
+                    select={selectSession}
+                    configure={(member) => setAgentDialog({ id: member.id, handoff: false })}
+                  />
                 )}
                 {historyPage && (
                   <button
@@ -600,6 +653,12 @@ export function App() {
               </>
             ) : (
               <div className="dashboard">
+                {workspace && workspace.id !== 'chat-scratch' && (
+                  <div className="dashboard-project-header">
+                    <strong>{workspace.name}</strong>
+                    {projectTools}
+                  </div>
+                )}
                 {hero}
                 {homeSessions.length > 0 && (
                   <div className="dashboard-heading">
@@ -697,12 +756,33 @@ export function App() {
           close={() => setDialog(null)}
         />
       )}
+      {dialog === 'changes' && client && workspace && (
+        <ProjectChanges
+          key={workspace.id}
+          client={client}
+          workspace={workspace}
+          close={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'plugins' && client && data && (
+        <ExtensionsDialog
+          client={client}
+          data={data}
+          session={session}
+          close={() => setDialog(null)}
+          configure={(member) => {
+            setDialog(null);
+            setAgentDialog({ id: member.id, handoff: false, tools: true });
+          }}
+        />
+      )}
       {dialog === 'new' && data && client && (
         <NewSession
           client={client}
           data={data}
           accountState={accountState}
-          initialProject={projectId}
+          initialProject={newChatProject}
+          initialMode={newChatMode}
           initialProvider={newSessionProvider}
           openAccounts={() => showSettings('Провайдеры')}
           busy={busy}
@@ -751,6 +831,7 @@ export function App() {
           data={data}
           session={data.sessions.find((s) => s.id === agentDialog.id)!}
           handoff={agentDialog.handoff}
+          initialToolsOpen={agentDialog.tools}
           busy={busy}
           close={() => setAgentDialog(null)}
           save={(config, transition) =>

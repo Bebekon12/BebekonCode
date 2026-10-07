@@ -6,7 +6,7 @@ test('readable chat uses a bundled Cyrillic font and appearance survives reload'
   await page.goto('/?preview=1');
   await expect(page.locator('.context-panel')).toHaveCount(0);
   await page.locator('.new-session-button').click();
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   const input = page.getByRole('textbox', { name: 'Сообщение агенту' });
   await expect(input).toHaveCSS('font-size', '17px');
   const font = await page.evaluate(async () => {
@@ -47,7 +47,7 @@ test('large text keeps chat actions inside a small Windows window', async ({ pag
   await page.getByLabel('Размер текста').selectOption('large');
   await page.keyboard.press('Escape');
   await page.locator('.new-session-button').click();
-  await page.getByRole('button', { name: 'Создать чат' }).click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).fill('Проверь удобство интерфейса');
   const input = await page.locator('.composer').boundingBox();
   const send = await page.getByRole('button', { name: 'Отправить сообщение' }).boundingBox();

@@ -10,6 +10,7 @@ export function NewSession({
   client,
   data,
   initialProject,
+  initialMode = 'single',
   openAccounts,
   close,
   create,
@@ -19,15 +20,23 @@ export function NewSession({
   data: Snapshot;
   accountState: AccountState;
   initialProject: string;
+  initialMode?: CreateChat['mode'];
   initialProvider?: string;
   openAccounts: () => void;
   close: () => void;
   create: (input: CreateChat) => void;
   busy: boolean;
 }) {
-  const [mode, setMode] = useState<CreateChat['mode']>('single');
+  const [mode, setMode] = useState<CreateChat['mode']>(initialMode);
   const [project, setProject] = useState(initialProject === 'chat-scratch' ? '' : initialProject);
-  const [agents, setAgents] = useState<AgentConfig[]>([defaultAgent(data)]);
+  const [agents, setAgents] = useState<AgentConfig[]>(() =>
+    initialMode === 'team'
+      ? [
+          defaultAgent(data),
+          { ...defaultAgent(data), role: 'Рецензент', permission_profile: 'read_only' },
+        ]
+      : [defaultAgent(data)],
+  );
   const valid = agents.every(
     (a) =>
       a.model &&
@@ -58,8 +67,8 @@ export function NewSession({
           {(
             [
               ['single', MessageSquare, 'Один агент. Модель и доступ можно менять в чате.'],
-              ['team', Network, 'Выбранные участники работают и обсуждают результаты.'],
-              ['auto', Layers, 'ИИ создаёт независимые подзадачи в отдельных контекстах.'],
+              ['team', Network, 'Участники выполняют задачу. Вы получаете один общий итог.'],
+              ['auto', Layers, 'ИИ разделяет задачу на подзадачи и собирает общий результат.'],
             ] as const
           ).map(([id, Icon, description]) => (
             <button

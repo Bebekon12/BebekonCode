@@ -12,6 +12,7 @@ export function ChatSettings({
   close,
   save,
   busy,
+  initialToolsOpen = false,
 }: {
   client: ClientTransport;
   data: Snapshot;
@@ -20,6 +21,7 @@ export function ChatSettings({
   close: () => void;
   save: (config: AgentConfig, transition: boolean) => void;
   busy: boolean;
+  initialToolsOpen?: boolean;
 }) {
   const [value, setValue] = useState(() => sessionConfig(session));
   const changedAccount =
@@ -45,6 +47,7 @@ export function ChatSettings({
         change={setValue}
         lockedAccount={!handoff}
         worker={!!session.parent_session_id}
+        initialToolsOpen={initialToolsOpen}
       />
       <div className="dialog-footer">
         <button className="secondary-button" onClick={close}>

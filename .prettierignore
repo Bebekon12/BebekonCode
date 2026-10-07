@@ -5,3 +5,4 @@ test-results/
 src-tauri/gen/
 package-lock.json
 .release-notes.md
+design/
