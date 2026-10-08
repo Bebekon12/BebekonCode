@@ -1,4 +1,5 @@
 use crate::{
+    claude::ClaudeProvider,
     codex::CodexProvider,
     model::*,
     provider::{detect_providers, AgentProvider, MockProvider, TurnRequest},
@@ -31,6 +32,7 @@ impl Core {
         let providers: Vec<Arc<dyn AgentProvider>> = vec![
             Arc::new(MockProvider),
             Arc::new(CodexProvider::new(account_events.clone())),
+            Arc::new(ClaudeProvider::new(account_events.clone())),
         ];
         Self::open_with(database, providers, account_events).await
     }

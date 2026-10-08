@@ -217,7 +217,17 @@ export function Settings({
                       <code>npm install -g @openai/codex</code>
                     </div>
                   )}
-                  {provider.id === 'openai' && (
+                  {provider.id === 'anthropic' && !provider.available && (
+                    <div className="setup-hint">
+                      <strong>Установка Claude Code для Windows</strong>
+                      <p>
+                        Установите официальный нативный CLI по документации Anthropic. Для уже
+                        установленного CLI выполните:
+                      </p>
+                      <code>claude update</code>
+                    </div>
+                  )}
+                  {['openai', 'anthropic'].includes(provider.id) && (
                     <ProviderAccounts
                       client={client}
                       provider={provider}

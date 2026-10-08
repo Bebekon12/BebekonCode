@@ -59,6 +59,35 @@ try {
     await sleep(200);
   }
   assert(page, 'Native packaged page unavailable');
+  if (process.argv.includes('--claude')) {
+    const result = await page.evaluate(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const snapshot = await invoke('snapshot');
+      const provider = snapshot.providers.find((p) => p.id === 'anthropic');
+      const account = await invoke('add_account', {
+        provider: 'anthropic',
+        label: 'Изолированный Claude',
+      });
+      const status = await invoke('account_status', { accountId: account.id });
+      const models = await invoke('account_models', { accountId: account.id });
+      const extensions = await invoke('account_extensions', { accountId: account.id });
+      await invoke('remove_account', { accountId: account.id });
+      return { provider, status, models, extensions };
+    });
+    assert(result.provider.available, result.provider.detail);
+    assert.equal(result.status.state, 'signed_out');
+    assert.equal(result.status.email, null);
+    assert.deepEqual(result.status.usage, []);
+    assert.deepEqual(
+      result.models.map((m) => m.id),
+      ['sonnet', 'opus', 'haiku'],
+    );
+    assert(result.extensions.errors.length > 0);
+    assert.deepEqual(result.extensions.plugins, []);
+    console.log(
+      'PASS: native Claude detection, isolated signed-out profile, official aliases and unavailable extensions',
+    );
+  }
   assert((await fs.stat(path.join(fixture, 'webview-profile'))).isDirectory());
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));

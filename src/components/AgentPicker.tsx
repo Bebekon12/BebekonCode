@@ -93,6 +93,13 @@ export function AgentPicker({
           аккаунт.
         </p>
       )}
+      {value.provider === 'anthropic' && (
+        <p className="small muted">
+          Claude использует официальный CLI и отдельный вход. Sonnet, Opus и Haiku — псевдонимы CLI;
+          доступ к модели проверяет Anthropic при запросе. В Windows доступны файлы проекта;
+          оболочка, плагины и MCP пока недоступны.
+        </p>
+      )}
       {!lockedAccount && (
         <div className="field-grid">
           <label className="field">

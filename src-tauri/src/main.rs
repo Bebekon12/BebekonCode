@@ -294,6 +294,9 @@ async fn account_login(
         .account_login(&account_id)
         .await
         .map_err(|error| error.to_string())?;
+    if login.url.is_empty() {
+        return Ok(());
+    }
     app.opener()
         .open_url(login.url, None::<&str>)
         .map_err(|_| "Не удалось открыть браузер для входа".to_string())
@@ -333,6 +336,7 @@ async fn account_extensions(
 fn open_usage(provider: String, app: tauri::AppHandle) -> IpcResult<()> {
     let url = match provider.as_str() {
         "openai" => agent_core::codex::siwc::USAGE_URL,
+        "anthropic" => agent_core::claude::USAGE_URL,
         _ => return Err("У этого провайдера нет страницы использования".into()),
     };
     app.opener()
@@ -425,6 +429,9 @@ async fn open_releases(state: State<'_, AppState>, app: tauri::AppHandle) -> Ipc
 }
 
 fn main() {
+    if agent_core::claude::hook_entry() {
+        return;
+    }
     // Only allowlisted static codes are logged. No provider payloads, prompt text or errors.
     tracing_subscriber::fmt()
         .with_env_filter("warn")

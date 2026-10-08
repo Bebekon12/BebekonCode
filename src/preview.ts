@@ -44,11 +44,11 @@ const state: Snapshot = {
     },
     {
       id: 'anthropic',
-      name: 'Anthropic / Claude Code',
-      available: false,
+      name: 'Claude · официальный Claude Code CLI',
+      available: true,
       detected_path: null,
       models: [],
-      detail: 'Адаптер с изолированными профилями — следующий этап.',
+      detail: 'Предпросмотр Claude. Настоящий CLI, вход и файлы доступны в приложении Windows.',
     },
   ],
   settings: { check_updates_on_start: false },
@@ -69,23 +69,32 @@ function previewStatus(accountId: string): AccountStatus {
     account_id: accountId,
     state: signedIn ? 'signed_in' : 'signed_out',
     email: signedIn ? 'preview@example.com' : null,
-    plan: signedIn ? 'plus' : null,
-    usage: signedIn
-      ? [
-          { window_minutes: 300, used_percent: 25, resets_at: now() + 2 * 3600, source: 'preview' },
-          {
-            window_minutes: 10080,
-            used_percent: 58,
-            resets_at: now() + 3 * 86400,
-            source: 'preview',
-          },
-        ]
-      : [],
+    plan: signedIn ? (account?.provider === 'anthropic' ? 'max' : 'plus') : null,
+    usage:
+      signedIn && account?.provider !== 'anthropic'
+        ? [
+            {
+              window_minutes: 300,
+              used_percent: 25,
+              resets_at: now() + 2 * 3600,
+              source: 'preview',
+            },
+            {
+              window_minutes: 10080,
+              used_percent: 58,
+              resets_at: now() + 3 * 86400,
+              source: 'preview',
+            },
+          ]
+        : [],
     limit_reached: null,
     credits: null,
     message: signedIn ? 'Предпросмотр: значения лимитов не настоящие' : null,
-    manage_usage_url: 'https://chatgpt.com/settings/usage',
-    plan_usage_enabled: signedIn ? true : null,
+    manage_usage_url:
+      account?.provider === 'anthropic'
+        ? 'https://claude.ai/settings/usage'
+        : 'https://chatgpt.com/settings/usage',
+    plan_usage_enabled: signedIn && account?.provider === 'openai' ? true : null,
     checked_at: now(),
   };
 }
@@ -284,7 +293,8 @@ export const preview: ClientTransport = {
   },
   refreshProviders: async () => state.providers,
   addAccount: async (provider, label) => {
-    if (provider !== 'openai') throw new Error('Для этого провайдера аккаунты не нужны');
+    if (!['openai', 'anthropic'].includes(provider))
+      throw new Error('Для этого провайдера аккаунты не нужны');
     if (!label.trim()) throw new Error('Название аккаунта должно содержать от 1 до 40 символов');
     const account = {
       id: crypto.randomUUID(),
@@ -328,6 +338,14 @@ export const preview: ClientTransport = {
     const account = state.accounts.find((item) => item.id === accountId);
     if (account?.provider === 'mock')
       return [{ id: 'mock-stream-v1', name: 'mock-stream-v1', description: '', is_default: true }];
+    if (account?.provider === 'anthropic')
+      return ['sonnet', 'opus', 'haiku'].map((id) => ({
+        id,
+        name: `Claude ${id}`,
+        description: 'Псевдоним CLI · предпросмотр',
+        is_default: id === 'sonnet',
+        reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      }));
     return [
       {
         id: 'preview-model',
@@ -338,36 +356,44 @@ export const preview: ClientTransport = {
       },
     ];
   },
-  accountExtensions: async () => ({
-    plugins: [
-      {
-        id: 'preview-plugin',
-        name: 'Пример плагина',
-        detail: '1.0.0',
-        enabled: true,
-        status: null,
-      },
-    ],
-    mcp_servers: [
-      {
-        id: 'preview-mcp',
-        name: 'preview-mcp',
-        detail: 'инструментов: 3',
-        enabled: true,
-        status: 'unsupported',
-      },
-    ],
-    skills: [
-      {
-        id: 'preview-skill',
-        name: 'Пример навыка',
-        detail: 'Предпросмотр',
-        enabled: true,
-        status: 'user',
-      },
-    ],
-    errors: [],
-  }),
+  accountExtensions: async (accountId) =>
+    state.accounts.find((a) => a.id === accountId)?.provider === 'anthropic'
+      ? {
+          plugins: [],
+          mcp_servers: [],
+          skills: [],
+          errors: ['Плагины, MCP и навыки Claude пока недоступны в Windows.'],
+        }
+      : {
+          plugins: [
+            {
+              id: 'preview-plugin',
+              name: 'Пример плагина',
+              detail: '1.0.0',
+              enabled: true,
+              status: null,
+            },
+          ],
+          mcp_servers: [
+            {
+              id: 'preview-mcp',
+              name: 'preview-mcp',
+              detail: 'инструментов: 3',
+              enabled: true,
+              status: 'unsupported',
+            },
+          ],
+          skills: [
+            {
+              id: 'preview-skill',
+              name: 'Пример навыка',
+              detail: 'Предпросмотр',
+              enabled: true,
+              status: 'user',
+            },
+          ],
+          errors: [],
+        },
   subscribeAccounts: async (onEvent) => {
     accountListeners.add(onEvent);
     return () => {

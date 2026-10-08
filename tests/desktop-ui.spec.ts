@@ -11,7 +11,7 @@ test('project, session, streaming, stop and keyboard commands', async ({ page })
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(
     page.getByLabel('Провайдер', { exact: true }).locator('option[value="anthropic"]'),
-  ).toHaveAttribute('disabled', '');
+  ).not.toHaveAttribute('disabled', '');
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'Сообщение агенту' })

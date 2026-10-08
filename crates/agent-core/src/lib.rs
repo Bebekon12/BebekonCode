@@ -1,5 +1,6 @@
 pub mod capabilities;
 mod chats;
+pub mod claude;
 pub mod codex;
 pub mod credentials;
 pub mod error;

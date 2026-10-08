@@ -34,6 +34,32 @@ Tested with codex-cli 0.160.1. Live checks that start the real CLI without signi
 
 ## Anthropic / Claude Code (`anthropic`)
 
-Detected only. Planned: the unmodified installed Claude Code, one `CLAUDE_CONFIG_DIR` per account,
-sign-in through Claude Code's own flow, `claude -p` with `stream-json`. See
-[provider compliance](provider-compliance.md) for the constraints that apply.
+Unmodified installed native Windows Claude Code **2.1.293+**, one explicit `CLAUDE_CONFIG_DIR`
+per account. Sign-in and credential storage belong exclusively to the official CLI. No copied
+default-client credentials, embedded OAuth, provider keys in the frontend or custom endpoints.
+
+- `auth status/login/logout`; the CLI opens its own browser flow. Console login instructions are
+  displayed with the exact isolated profile. No quota percentages are inferred.
+- `claude --print --output-format stream-json --verbose --include-partial-messages`, prompt over
+  stdin, UUID session resume, structured output for automatic task decomposition.
+- Sonnet/Opus/Haiku are documented aliases, not a discovered entitlement catalog. Anthropic
+  enforces actual model/effort availability and billing. No configured fallback model or account.
+- `--restricted`, default permissions, an explicit file-tool allowlist, empty strict MCP config,
+  disabled custom slash commands and only managed/explicit settings. No Windows shell tools,
+  web tools, plugins, skills or nested agents: the native Windows shell is not sandboxed.
+- PreToolUse validates project paths; PermissionRequest forwards file-write approvals through a
+  local-only named pipe and exec-form hooks. Cancellation, missing UI, hook errors and timeouts
+  cannot grant a write. Session grants cover one canonical file and stay in memory.
+- Only assistant text and tool activity are normalized; hidden reasoning is not displayed or
+  persisted. Missing final results and limit/auth errors fail visibly. Job Objects stop owned
+  process trees. No telemetry is added; documented CLI telemetry switches are disabled.
+
+Core tests drive an explicit protocol fixture through real subprocess pipes and named-pipe
+approvals, mixed teams, auto mode and handoff. They do not prove live subscription inference.
+`cargo test -p agent-core --test claude_live -- --ignored` tests the actual installed CLI against
+a fresh signed-out profile without inference or copying any credentials.
+`cargo test -p agent-core installed_cli_accepts -- --ignored` checks that the actual CLI parses
+the protected launch flags and returns an authentication error before inference. After packaging,
+`node scripts/claude-native-audit.mjs` checks exec-form hook IPC in the GUI executable;
+`npm run test:native -- --claude` checks real Tauri detection and an isolated signed-out profile.
+See [provider compliance](provider-compliance.md) for official sources and limitations.

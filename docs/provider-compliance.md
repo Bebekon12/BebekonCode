@@ -1,6 +1,6 @@
 # Provider compliance
 
-Official documentation last checked: **2026-10-06**. This records technical integration research
+Official documentation last checked: **2026-10-08**. This records technical integration research
 and the resulting design. It is not a claim of provider approval or a legal audit.
 
 Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
@@ -20,8 +20,7 @@ driving the official `codex app-server` over stdio exactly as that documentation
 
 - [Overview](https://developers.openai.com/siwc/token-sharing-open-source): the flow is for
   open-source and locally hosted apps; paid or remotely hosted apps must use OpenAI's interest
-  form instead. BebekonCode is free and runs locally. The public repository currently has no
-  open-source licence; adding one is an owner decision that should precede wide distribution.
+  form instead. BebekonCode is free, runs locally and is published under the repository's MIT licence.
 - [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in):
   dynamic registration with `client_id=dynamic_agent_client`, `agent_name_hint=BebekonCode`, a
   stable `ext_agent_host_id` (`urn:uuid:` per installation), PKCE S256, fresh `state`/`nonce`,
@@ -89,12 +88,33 @@ Protocol shapes are also checked against the official installed CLI 0.160.1 gene
 - ChatGPT-plan hosted image generation remains unavailable. No claim that model selection or a role
   gives a provider an unsupported tool.
 
-Anthropic remains unavailable until its official CLI adapter, approvals and Windows execution
-restrictions have been implemented and tested. Current
-[legal guidance](https://code.claude.com/docs/en/legal-and-compliance) permits hosting the unchanged
-CLI with the end user's own authentication, while prohibiting collecting/intermediating Claude
-credentials. The [subscription SDK notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
-states that the June usage-credit change is paused; this does not authorize copying OAuth tokens.
+## Claude adapter design (0.6.0, checked 2026-10-08)
+
+The [legal guidance](https://code.claude.com/docs/en/legal-and-compliance) permits running the
+unchanged binary with the end user's own authentication under the applicable Anthropic terms.
+It does not authorize our own claude.ai OAuth flow, collecting tokens or reselling usage.
+The [subscription notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+updated October 7 permits continued subscription-limit use; credits and entitlement remain
+Anthropic's decision. No quota API or token extraction is used.
+
+Route: installed, unmodified native Claude Code, `CLAUDE_CONFIG_DIR` per account, official
+`auth login/status/logout`, and documented `-p` stream JSON. Credentials remain CLI-owned.
+Require 2.1.293+ (verified locally with 2.1.294). Older installations stay unavailable.
+
+- [Restricted mode](https://code.claude.com/docs/en/cli-reference): confine file tools to the
+  project, ignore user/project settings, refuse permission bypass. Only Read/Glob/Grep/Edit/Write
+  are offered. Shell, web, MCP, plugins and nested agents are unavailable on this Windows route.
+- [Windows sandbox limits](https://code.claude.com/docs/en/sandboxing): native shell commands are
+  unsandboxed; therefore none are exposed. Restricted file access is not an OS process sandbox.
+- [Hooks](https://code.claude.com/docs/en/hooks): exec-form PreToolUse checks paths and forces
+  write prompts; PermissionRequest forwards explicit user decisions over local-only named pipes.
+  Missing replies deny. Read-only participants cannot write. No global permission rules change.
+- [Headless](https://code.claude.com/docs/en/headless): normalize text deltas, result errors,
+  session IDs, structured output and compaction. Ignore thinking and unknown messages.
+- [Models](https://code.claude.com/docs/en/model-config): documented aliases and effort levels,
+  explicitly labelled as choices, not an account-entitlement catalog. CLI rejects unavailable models.
+
+Live inference requires the user's own login; fixture tests do not prove live subscription access.
 
 ## Anthropic integration references
 

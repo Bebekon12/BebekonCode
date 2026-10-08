@@ -92,7 +92,9 @@ export function ProviderAccounts({
       <div className="row-between">
         <strong className="section-label">Аккаунты</strong>
         <span className="muted small">
-          Отдельная регистрация Sign in with ChatGPT и папка Codex для каждого аккаунта
+          {provider.id === 'anthropic'
+            ? 'Отдельная папка Claude и собственный вход Anthropic для каждого аккаунта'
+            : 'Отдельная регистрация Sign in with ChatGPT и папка Codex для каждого аккаунта'}
         </span>
       </div>
       {accounts.map((account) => (
@@ -106,8 +108,9 @@ export function ProviderAccounts({
       ))}
       {!accounts.length && (
         <p className="muted small">
-          Добавьте аккаунт ChatGPT. Вход и разрешение на использование плана выполняются на
-          официальной странице OpenAI.
+          {provider.id === 'anthropic'
+            ? 'Добавьте аккаунт Claude. Неизменённый официальный CLI откроет собственный вход Anthropic. Можно использовать поддерживаемую подписку или вход Console; использование оплачивается владельцем аккаунта.'
+            : 'Добавьте аккаунт ChatGPT. Вход и разрешение на использование плана выполняются на официальной странице OpenAI.'}
         </p>
       )}
       {adding ? (
@@ -139,7 +142,7 @@ export function ProviderAccounts({
           disabled={!provider.available}
           onClick={() => setAdding(true)}
         >
-          <Plus size={14} /> Добавить аккаунт ChatGPT
+          <Plus size={14} /> Добавить аккаунт {provider.id === 'anthropic' ? 'Claude' : 'ChatGPT'}
         </button>
       )}
       {error && <p className="notice error">{error}</p>}
@@ -236,15 +239,30 @@ function AccountCard({
           className="text-button manage-usage"
           onClick={() => void run(() => client.openUsage(account.provider))}
         >
-          Управлять использованием в ChatGPT <ArrowUpRight size={13} />
+          Управлять использованием в {account.provider === 'anthropic' ? 'Claude' : 'ChatGPT'}{' '}
+          <ArrowUpRight size={13} />
         </button>
       )}
       {signingIn && (
         <p className="muted small">
-          Завершите вход на открывшейся странице OpenAI в браузере. Пароль вводится только там;
-          BebekonCode хранит выданные токены зашифрованными (Windows DPAPI) и передаёт их только
-          процессу Codex этого аккаунта.
+          {account.provider === 'anthropic'
+            ? 'Завершите штатный вход Claude Code в браузере. BebekonCode не получает пароль или токены. Если страница не открылась, используйте claude auth login с CLAUDE_CONFIG_DIR, указанным ниже.'
+            : 'Завершите вход на открывшейся странице OpenAI в браузере. Пароль вводится только там; BebekonCode хранит выданные токены зашифрованными (Windows DPAPI) и передаёт их только процессу Codex этого аккаунта.'}
         </p>
+      )}
+      {account.provider === 'anthropic' && account.config_dir && (
+        <details className="small muted">
+          <summary>Профиль Claude и альтернативный вход</summary>
+          <p>
+            Профиль этого аккаунта: <code className="path">{account.config_dir}</code>
+          </p>
+          <p>Для входа через Claude Console выполните в PowerShell:</p>
+          <code className="path">
+            $env:CLAUDE_CONFIG_DIR = '{account.config_dir.replaceAll("'", "''")}'; claude auth login
+            --console
+          </code>
+          <p>Затем нажмите «Обновить». Все штатные способы входа CLI сохранены.</p>
+        </details>
       )}
 
       <div className="account-actions">
@@ -264,7 +282,8 @@ function AccountCard({
               })
             }
           >
-            <LogIn size={14} /> Continue with ChatGPT
+            <LogIn size={14} />{' '}
+            {account.provider === 'anthropic' ? 'Войти через Claude Code' : 'Continue with ChatGPT'}
           </button>
         )}
         <button
@@ -329,8 +348,8 @@ function AccountCard({
       {confirmRemove && (
         <div className="file-decision" role="alertdialog" aria-label="Удаление аккаунта">
           <p>
-            Удалить «{account.label}»? BebekonCode отзовёт доступ, удалит сохранённые токены и
-            отдельную папку Codex. Аккаунт OpenAI и ваши проекты не затрагиваются.
+            Удалить «{account.label}»? Будет удалён локальный профиль провайдера, если он не
+            используется чатами. Учётная запись провайдера и ваши проекты сохранятся.
           </p>
           <div>
             <button className="secondary-button" onClick={() => setConfirmRemove(false)}>
@@ -368,7 +387,9 @@ function AccountCard({
             </p>
           ))}
           <p className="muted small">
-            Установка и настройка выполняются средствами Codex для этого аккаунта.
+            {account.provider === 'anthropic'
+              ? 'Расширения Claude не запускаются в текущем режиме Windows.'
+              : 'Установка и настройка выполняются средствами Codex для этого аккаунта.'}
           </p>
         </div>
       )}

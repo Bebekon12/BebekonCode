@@ -59,6 +59,9 @@ jobs:
           prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
+      - name: Audit packaged Claude approval hook
+        if: steps.published.outputs.ready != 'true'
+        run: node scripts/claude-native-audit.mjs
       - name: Audit actual signed installer before publication
         if: steps.published.outputs.ready != 'true'
         shell: pwsh
