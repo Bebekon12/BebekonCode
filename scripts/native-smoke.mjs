@@ -61,6 +61,29 @@ try {
   }
   assert(page, 'Native packaged page unavailable');
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  const sandboxIpc = await page.evaluate(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const account = await invoke('add_account', {
+      provider: 'openai',
+      label: 'Проверка песочницы без входа',
+    });
+    const status = await invoke('account_status', { accountId: account.id });
+    let error;
+    try {
+      await invoke('setup_sandbox', { accountId: account.id });
+    } catch (reason) {
+      error = String(reason);
+    }
+    await invoke('remove_account', { accountId: account.id });
+    return { status, error };
+  });
+  assert.equal(sandboxIpc.status.state, 'signed_out');
+  assert.equal(sandboxIpc.status.sandbox, null);
+  assert(sandboxIpc.error && !sandboxIpc.error.includes('not found'));
+  assert.match(sandboxIpc.error, /вход|Войдите|ChatGPT/);
+  console.log(
+    'PASS: native sandbox setup IPC rejects a signed-out account without starting Windows setup',
+  );
   if (process.argv.includes('--claude')) {
     const result = await page.evaluate(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;

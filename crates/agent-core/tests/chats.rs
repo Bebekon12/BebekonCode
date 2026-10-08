@@ -22,6 +22,7 @@ struct Probe {
     peak: AtomicUsize,
     writing: AtomicUsize,
     peak_writing: AtomicUsize,
+    parallel_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
 }
 struct Engine {
     id: &'static str,
@@ -71,6 +72,12 @@ impl AgentProvider for Engine {
         if writing {
             let count = self.probe.writing.fetch_add(1, Ordering::SeqCst) + 1;
             self.probe.peak_writing.fetch_max(count, Ordering::SeqCst);
+        }
+        let barrier = self.probe.parallel_barrier.lock().unwrap().clone();
+        if request.session.parent_session_id.is_some() {
+            if let Some(barrier) = barrier {
+                tokio::select! { _ = cancel.cancelled() => {}, _ = barrier.wait() => {} }
+            }
         }
         tokio::select! { _=cancel.cancelled()=>{}, _=tokio::time::sleep(std::time::Duration::from_millis(80))=>{} }
         self.probe.active.fetch_sub(1, Ordering::SeqCst);
@@ -335,6 +342,8 @@ async fn handoff_is_atomic_preserves_chat_and_injects_summary_into_target() {
 #[tokio::test]
 async fn auto_contexts_are_parallel_read_only_persisted_and_share_the_goal() {
     let (_dir, core, probe, _) = fixture().await;
+    // Assert actual overlap without relying on scheduler timing or an 80 ms sleep.
+    *probe.parallel_barrier.lock().unwrap() = Some(Arc::new(tokio::sync::Barrier::new(2)));
     let chat = core
         .create_chat(CreateChat {
             workspace_id: None,

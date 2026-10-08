@@ -10,16 +10,16 @@ export const accessOptions = [
   },
   {
     id: 'standard',
-    label: 'С подтверждением',
+    label: 'По правилам провайдера',
     description:
-      'Claude спрашивает перед правками. Codex запрашивает дополнительные разрешения по своим правилам.',
+      'Claude спрашивает перед правками. Для Codex действует авторежим песочницы; отдельное подтверждение каждой правки пока недоступно.',
     Icon: ShieldQuestion,
   },
   {
     id: 'workspace_auto',
-    label: 'Автоправки в проекте',
+    label: 'Авто в проекте',
     description:
-      'Claude принимает правки файлов проекта автоматически. Codex сохраняет свои запросы разрешений.',
+      'Правки в проекте автоматически. Codex также выполняет команды в песочнице. Дополнительный доступ требует подтверждения.',
     Icon: ShieldCheck,
   },
 ] as const;
@@ -67,7 +67,7 @@ export function AccessPicker({
         onClick={() => setOpen(!open)}
       >
         <active.Icon size={16} />
-        <span>{value === 'standard' ? 'С подтверждением' : active.label}</span>
+        <span>{active.label}</span>
         <ChevronDown size={13} />
       </button>
       {open && (
@@ -93,7 +93,10 @@ export function AccessPicker({
               {id === value && <Check size={17} />}
             </button>
           ))}
-          <p>Доступ за пределы проекта и отключение защит в этих режимах не предоставляются.</p>
+          <p>
+            Доступ за пределы песочницы требует отдельного подтверждения. В режиме чтения он
+            запрещён.
+          </p>
         </div>
       )}
     </div>

@@ -79,6 +79,20 @@ async fn sign_in_with_chatgpt_profile_and_documented_app_server_configuration() 
         extensions.errors
     );
 
+    let status = core
+        .account_status(&account.id)
+        .await
+        .expect("sandbox status");
+    let sandbox = status.sandbox.expect("official readiness response");
+    assert!(
+        matches!(
+            sandbox.state.as_str(),
+            "ready" | "not_configured" | "update_required"
+        ),
+        "{}",
+        sandbox.detail
+    );
+    // Never invoke setup here: it can require UAC and change Windows accounts/firewall rules.
     core.shutdown().await;
     siwc::save(&profile, &siwc::Credentials::default()).expect("clear");
     core.remove_account(&account.id).await.expect("remove");

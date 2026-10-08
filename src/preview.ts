@@ -59,6 +59,7 @@ const history: AgentEvent[] = [];
 const listeners = new Set<(event: AgentEvent) => void>();
 const accountListeners = new Set<(event: AccountEvent) => void>();
 const cancelled = new Set<string>();
+const sandboxReady = new Set<string>();
 const approvals = new Map<string, { sessionId: string; resolve: (decision: string) => void }>();
 const now = () => Math.floor(Date.now() / 1000);
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,6 +69,15 @@ function previewStatus(accountId: string): AccountStatus {
   const signedIn = account?.auth_status === 'signed_in';
   return {
     account_id: accountId,
+    sandbox:
+      signedIn && account?.provider === 'openai'
+        ? {
+            state: sandboxReady.has(accountId) ? 'ready' : 'not_configured',
+            detail: sandboxReady.has(accountId)
+              ? 'Демонстрация: песочница готова. Windows не изменялась.'
+              : 'Демонстрация: настройте песочницу Windows для этого аккаунта.',
+          }
+        : null,
     state: signedIn ? 'signed_in' : 'signed_out',
     email: signedIn ? 'preview@example.com' : null,
     plan: signedIn ? (account?.provider === 'anthropic' ? 'max' : 'plus') : null,
@@ -310,6 +320,7 @@ export const preview: ClientTransport = {
           detail: 'npm test',
           cwd: session.working_directory,
           reason: 'Предпросмотр: запуск тестов проекта',
+          available_decisions: ['allow_once', 'deny'],
         });
         const answer = await Promise.race([
           decision,
@@ -377,6 +388,10 @@ export const preview: ClientTransport = {
     state.accounts = state.accounts.filter((item) => item.id !== accountId);
   },
   accountStatus: async (accountId) => previewStatus(accountId),
+  setupSandbox: async (accountId) => {
+    sandboxReady.add(accountId);
+    return { state: 'ready', detail: 'Демонстрация: песочница готова. Windows не изменялась.' };
+  },
   accountLogin: async (accountId) => {
     // Preview never opens a provider page; it simulates the completion notification.
     setTimeout(() => {

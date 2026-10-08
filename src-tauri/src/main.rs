@@ -347,8 +347,17 @@ async fn account_status(
         .await
         .map_err(|error| error.to_string())
 }
-/// Starts the provider's own sign-in and opens its official page in the default browser.
-/// The app never sees or stores the resulting credentials.
+/// Runs the official sandbox setup only after an explicit user action.
+#[tauri::command]
+async fn setup_sandbox(account_id: String, state: State<'_, AppState>) -> IpcResult<SandboxStatus> {
+    state
+        .core
+        .setup_sandbox(&account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Starts sign-in and opens the provider's official page in the default browser.
 #[tauri::command]
 async fn account_login(
     account_id: String,
@@ -607,6 +616,7 @@ fn main() {
             rename_account,
             remove_account,
             account_status,
+            setup_sandbox,
             account_login,
             account_logout,
             account_models,

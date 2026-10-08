@@ -125,6 +125,8 @@ pub enum EventPayload {
         detail: String,
         cwd: Option<String>,
         reason: Option<String>,
+        #[serde(default)]
+        available_decisions: Option<Vec<ApprovalDecision>>,
     },
     ApprovalResolved {
         id: String,
@@ -157,6 +159,8 @@ pub enum ApprovalDecision {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccountStatus {
     #[serde(default)]
+    pub sandbox: Option<SandboxStatus>,
+    #[serde(default)]
     pub usage_detail: Option<String>,
     pub account_id: String,
     /// `signed_in`, `signed_out`, `not_required`, `unavailable` or `error`.
@@ -172,6 +176,13 @@ pub struct AccountStatus {
     /// Official page where the provider shows usage and limits for this account.
     pub manage_usage_url: Option<String>,
     pub checked_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxStatus {
+    /// ready, not_configured, update_required, setting_up, unavailable or error.
+    pub state: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

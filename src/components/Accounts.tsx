@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Server,
   Sparkles,
+  ShieldCheck,
   Trash2,
   UserRound,
 } from 'lucide-react';
@@ -159,6 +160,7 @@ function AccountCard({
   const status = state.statuses[account.id];
   const signingIn = state.signingIn[account.id];
   const [busy, setBusy] = useState(false);
+  const [settingUpSandbox, setSettingUpSandbox] = useState(false);
   const [error, setError] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [label, setLabel] = useState(account.label);
@@ -242,6 +244,54 @@ function AccountCard({
           Управлять использованием в {account.provider === 'anthropic' ? 'Claude' : 'ChatGPT'}{' '}
           <ArrowUpRight size={13} />
         </button>
+      )}
+      {signedIn && account.provider === 'openai' && status?.sandbox && (
+        <div className="sandbox-status" role="status" aria-label="Песочница Windows">
+          <div className="row-between">
+            <strong>
+              <ShieldCheck size={15} /> Песочница Windows
+            </strong>
+            <span className="muted small">
+              {status.sandbox.state === 'ready'
+                ? 'Готова'
+                : settingUpSandbox
+                  ? 'Настройка…'
+                  : 'Требует внимания'}
+            </span>
+          </div>
+          <p className="muted small">
+            {settingUpSandbox
+              ? 'Codex настраивает песочницу. Подтвердите системный запрос Windows, если он появится.'
+              : status.sandbox.detail}
+          </p>
+          {status.sandbox.state !== 'ready' && (
+            <>
+              <p className="muted small">
+                Штатная настройка Codex может создать ограниченные учётные записи Windows и правила
+                изоляции. Команды агента затем выполняются без прав администратора. Сначала
+                остановите задачи этого аккаунта.
+              </p>
+              <button
+                className="secondary-button"
+                disabled={busy || settingUpSandbox || status.sandbox.state === 'setting_up'}
+                onClick={() => {
+                  setSettingUpSandbox(true);
+                  void run(async () => {
+                    try {
+                      await client.setupSandbox(account.id);
+                    } finally {
+                      setSettingUpSandbox(false);
+                      await state.refresh(account.id);
+                    }
+                  });
+                }}
+              >
+                <ShieldCheck size={14} />{' '}
+                {settingUpSandbox ? 'Настройка…' : 'Настроить песочницу Windows'}
+              </button>
+            </>
+          )}
+        </div>
       )}
       {signingIn && (
         <p className="muted small">

@@ -76,6 +76,15 @@ pub trait AgentProvider: Send + Sync {
         Ok(())
     }
 
+    async fn setup_sandbox(
+        &self,
+        _account: &AccountProfile,
+    ) -> Result<crate::model::SandboxStatus> {
+        Err(CoreError::Invalid(
+            "Настройка песочницы недоступна для этого провайдера".into(),
+        ))
+    }
+
     async fn extensions(&self, _account: &AccountProfile) -> Result<Extensions> {
         Ok(Extensions::default())
     }

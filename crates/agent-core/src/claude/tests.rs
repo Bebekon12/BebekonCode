@@ -93,6 +93,25 @@ fn file_guard_rejects_escape_credentials_and_commands() {
 }
 
 #[cfg(windows)]
+#[test]
+fn file_guard_accepts_absolute_paths_using_the_original_windows_root_spelling() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    std::fs::write(temp.path().join("a.txt"), "safe").unwrap();
+    let alias = PathBuf::from(temp.path().to_string_lossy().to_lowercase());
+    assert!(guard::checked_path(&alias, &json!({"file_path":alias.join("a.txt")}), "Read").is_ok());
+    assert!(
+        guard::checked_path(&alias, &json!({"file_path":alias.join("new.txt")}), "Write").is_ok()
+    );
+    assert!(guard::checked_path(&alias, &json!({"file_path":alias.join(".env")}), "Read").is_err());
+    assert!(guard::checked_path(
+        &alias,
+        &json!({"file_path":alias.join("../outside.txt")}),
+        "Write"
+    )
+    .is_err());
+}
+
+#[cfg(windows)]
 fn fixture_provider() -> Arc<ClaudeProvider> {
     let (notifications, _) = broadcast::channel(16);
     let provider = Arc::new(ClaudeProvider::new(notifications));

@@ -80,6 +80,10 @@ pub(super) fn checked_path(root: &Path, input: &Value, tool: &str) -> Result<Pat
     if ["Read", "Edit", "Write"].contains(&tool) && supplied.is_empty() {
         return Err(failure("Отсутствует путь файла", None));
     }
+    // Windows may spell the same root with a short 8.3 alias or different case. Retain
+    // the caller's spelling for lexical prefix stripping, then resolve the relative
+    // suffix through the canonical project root and the existing reparse-point guard.
+    let supplied_root = root;
     let root = root.canonicalize()?;
     let plain_root = root
         .to_string_lossy()
@@ -90,6 +94,7 @@ pub(super) fn checked_path(root: &Path, input: &Value, tool: &str) -> Result<Pat
         supplied
             .strip_prefix(&root)
             .or_else(|_| supplied.strip_prefix(Path::new(&plain_root)))
+            .or_else(|_| supplied.strip_prefix(supplied_root))
             .map_err(|_| failure("Путь за пределами проекта", None))?
     } else {
         supplied
@@ -339,6 +344,7 @@ async fn manual_decision(
     );
     let sent = events
         .send(EventPayload::ApprovalRequested {
+            available_decisions: None,
             id: id.clone(),
             kind: "file_change".into(),
             title: format!(

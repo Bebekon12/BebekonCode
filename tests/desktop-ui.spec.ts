@@ -125,6 +125,11 @@ test('codex account sign-in, usage limits and command approval', async ({ page }
   await expect(card.getByText('Plus', { exact: true })).toBeVisible();
   await expect(card.getByRole('meter', { name: /5 часов: использовано 25%/ })).toBeVisible();
   await expect(card.getByRole('meter', { name: /Неделя: использовано 58%/ })).toBeVisible();
+  const sandbox = card.getByRole('status', { name: 'Песочница Windows' });
+  await expect(sandbox).toContainText('Требует внимания');
+  await sandbox.getByRole('button', { name: 'Настроить песочницу Windows' }).click();
+  await expect(sandbox).toContainText('Готова');
+  await expect(sandbox.getByRole('button')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/accounts.png', fullPage: true });
   await page.keyboard.press('Escape');
 
@@ -139,6 +144,8 @@ test('codex account sign-in, usage limits and command approval', async ({ page }
   const approval = page.getByRole('alertdialog', { name: 'Codex хочет выполнить команду' });
   await expect(approval).toBeVisible();
   await expect(approval.getByText('npm test')).toBeVisible();
+  await expect(approval).toContainText('остальные команды и других участников');
+  await expect(approval.getByRole('button', { name: 'Разрешить в этом контексте' })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/approval.png', fullPage: true });
   await approval.getByRole('button', { name: 'Разрешить один раз' }).click();
   await expect(page.getByText('Разрешено один раз')).toBeVisible();

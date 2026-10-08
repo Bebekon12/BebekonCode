@@ -1,4 +1,4 @@
-import type { AgentEvent, SessionStatus } from './contracts';
+import type { AgentEvent, ApprovalDecision, SessionStatus } from './contracts';
 export interface TimelineActivity {
   label: string;
   detail: string;
@@ -11,6 +11,7 @@ export interface TimelineApproval {
   detail: string;
   cwd: string | null;
   reason: string | null;
+  available_decisions?: ApprovalDecision[] | null;
   decision?: string;
   timestamp: number;
 }
@@ -120,6 +121,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
           detail: event.payload.detail,
           cwd: event.payload.cwd,
           reason: event.payload.reason,
+          available_decisions: event.payload.available_decisions,
           timestamp: event.timestamp,
         });
         break;

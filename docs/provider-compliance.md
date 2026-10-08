@@ -13,6 +13,49 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
 
+## Windows sandbox and approvals (0.8.1, checked 2026-10-09)
+
+Official references: [agent approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security),
+[Windows sandbox](https://learn.chatgpt.com/docs/windows/windows-sandbox),
+[app-server setup and approval protocol](https://learn.chatgpt.com/docs/app-server), and the
+[official readiness response schema](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/schema/typescript/v2/WindowsSandboxReadinessResponse.ts).
+The installed official CLI 0.160.1 stable generated schema also includes `windowsSandbox/readiness`
+with a null payload and `ready`, `notConfigured`, `updateRequired` responses.
+
+- `workspace-write` plus `on-request` already is Codex's documented Auto preset. Both `standard`
+  and `workspace_auto` retain that policy for Codex; UI states that confirming every individual
+  Codex edit is unavailable. Retired `untrusted`/`unlessTrusted` settings are not introduced.
+- On Windows, readiness is checked before every Codex turn (including read-only workers). A
+  missing, outdated or unknown sandbox stops the turn before inference with recovery instructions,
+  instead of relying on a series of shell escalation prompts. Readiness is also shown per account.
+- Only clicking the account's setup button invokes `windowsSandbox/setupStart` in `elevated`
+  mode. The client waits for the matching completion notification and rechecks readiness. Setup
+  is blocked while that account has active workers; new turns cannot race setup. Cancellation of
+  a task waiting for setup is respected. Failure never selects an unelevated or unrestricted
+  fallback. Timeout ends the idle app-server, leaving readiness to be checked on reconnection.
+- Windows/UAC owns the administrator consent. The official legacy setup may create restricted
+  users and isolation rules; agent commands do not run as administrator. Setup is never triggered
+  by startup, status refresh, a model request or an automated test against the real Windows host.
+  MXC settings from CLI 0.162+ are not forced onto the tested CLI 0.160.1.
+- `availableDecisions`, when provided, restricts both UI buttons and backend decisions. Absent
+  values preserve compatibility with old saved events. Managed network requests show the host
+  and protocol instead of implying they are ordinary commands. `acceptForSession` is forwarded
+  to Codex for the requesting agent only; it does not become a blanket grant for the team.
+- Read-only runs decline escalation and file-change approval requests with a visible explanation;
+  the reviewer cannot gain write access by accepting a prompt during a read-only review round.
+- No command-text heuristic, automatic acceptance of server requests, authentication workaround,
+  disabled sandbox, global permission grant or modification of another app's profile is used.
+- Claude's file hook retains the original Windows root spelling when reducing absolute paths
+  to relative paths (including short-path aliases). The suffix still goes through the canonical
+  root, credential-path denial and existing reparse-point/traversal checks. Reference rechecked:
+  [official permissions and hooks](https://code.claude.com/docs/en/permissions). No CLI modes or
+  allowed tools were expanded.
+
+Validation includes simulated RPC setup completion/failure/busy cases and unsupported or wrong-agent
+approval responses, plus the real CLI's readiness query in a fresh isolated profile without
+inference. Real administrator-approved setup and authenticated model command execution require
+the user's own interactive Windows session and remain unverified by the automated release checks.
+
 ## OpenAI / Codex (implemented in 0.3.0)
 
 Route: **Sign in with ChatGPT — ChatGPT plan usage for open-source and locally hosted apps**,

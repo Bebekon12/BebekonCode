@@ -58,6 +58,7 @@ export const desktop: ClientTransport = {
   renameAccount: (accountId, label) => invoke('rename_account', { accountId, label }),
   removeAccount: (accountId) => invoke('remove_account', { accountId }),
   accountStatus: (accountId) => invoke('account_status', { accountId }),
+  setupSandbox: (accountId) => invoke('setup_sandbox', { accountId }),
   accountLogin: (accountId) => invoke('account_login', { accountId }),
   accountLogout: (accountId) => invoke('account_logout', { accountId }),
   accountModels: (accountId) => invoke('account_models', { accountId }),

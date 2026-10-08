@@ -9,6 +9,25 @@ const event = (sequence: number, run_id: string, payload: EventPayload): AgentEv
   timestamp: 0,
 });
 describe('event replay', () => {
+  it('preserves provider approval choices including an empty subset', () => {
+    const request = {
+      type: 'approval_requested' as const,
+      id: 'worker:approval',
+      kind: 'command',
+      title: 'Команда',
+      detail: 'npm test',
+      cwd: null,
+      reason: null,
+    };
+    const [turn] = buildTimeline([
+      event(1, 'a', { ...request, available_decisions: ['allow_once', 'deny'] }),
+      event(2, 'a', { ...request, id: 'empty', available_decisions: [] }),
+      event(3, 'a', { ...request, id: 'old' }),
+    ]);
+    expect(turn?.approvals[0]?.available_decisions).toEqual(['allow_once', 'deny']);
+    expect(turn?.approvals[1]?.available_decisions).toEqual([]);
+    expect(turn?.approvals[2]?.available_decisions).toBeUndefined();
+  });
   it('keeps worker stages separate and updates the reported model without duplicating text', () => {
     const message = {
       type: 'team_message' as const,

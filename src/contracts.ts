@@ -97,6 +97,7 @@ export type EventPayload =
       detail: string;
       cwd: string | null;
       reason: string | null;
+      available_decisions?: ApprovalDecision[] | null;
     }
   | { type: 'approval_resolved'; id: string; decision: string }
   | { type: 'turn_completed' | 'session_stopped' }
@@ -109,6 +110,7 @@ export interface UsageWindow {
   source: string;
 }
 export interface AccountStatus {
+  sandbox?: SandboxStatus | null;
   usage_detail?: string | null;
   account_id: string;
   state: 'signed_in' | 'signed_out' | 'not_required' | 'unavailable' | 'error';
@@ -121,6 +123,10 @@ export interface AccountStatus {
   manage_usage_url: string | null;
   plan_usage_enabled: boolean | null;
   checked_at: number;
+}
+export interface SandboxStatus {
+  state: 'ready' | 'not_configured' | 'update_required' | 'setting_up' | 'unavailable' | 'error';
+  detail: string;
 }
 export interface AccountEvent {
   account_id: string;
@@ -238,6 +244,7 @@ export interface ClientTransport {
   renameAccount(accountId: string, label: string): Promise<AccountProfile>;
   removeAccount(accountId: string): Promise<void>;
   accountStatus(accountId: string): Promise<AccountStatus>;
+  setupSandbox(accountId: string): Promise<SandboxStatus>;
   accountLogin(accountId: string): Promise<void>;
   accountLogout(accountId: string): Promise<void>;
   accountModels(accountId: string): Promise<ModelInfo[]>;

@@ -448,6 +448,7 @@ impl Core {
                         detail,
                         cwd,
                         reason,
+                        available_decisions,
                     } => Some(EventPayload::ApprovalRequested {
                         id: format!("{session}:{id}"),
                         kind: kind.clone(),
@@ -455,6 +456,7 @@ impl Core {
                         detail: detail.clone(),
                         cwd: cwd.clone(),
                         reason: reason.clone(),
+                        available_decisions: available_decisions.clone(),
                     }),
                     EventPayload::ApprovalResolved { id, decision } => {
                         Some(EventPayload::ApprovalResolved {
@@ -699,6 +701,12 @@ impl Core {
     pub async fn account_login(&self, id: &str) -> Result<LoginStart> {
         let account = self.account(id).await?;
         self.engine(&account.provider)?.login(&account).await
+    }
+    pub async fn setup_sandbox(&self, id: &str) -> Result<SandboxStatus> {
+        let account = self.account(id).await?;
+        self.engine(&account.provider)?
+            .setup_sandbox(&account)
+            .await
     }
     pub async fn account_logout(&self, id: &str) -> Result<()> {
         let account = self.account(id).await?;

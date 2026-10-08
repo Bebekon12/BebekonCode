@@ -64,7 +64,7 @@ test('access descriptions and effort slider fit a compact window', async ({ page
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByLabel('Доступ в чате').click();
   const menu = page.getByLabel('Уровни доступа');
-  await expect(menu).toContainText('Автоправки в проекте');
+  await expect(menu).toContainText('Авто в проекте');
   const box = (await menu.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.y).toBeGreaterThanOrEqual(0);

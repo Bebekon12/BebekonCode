@@ -12,6 +12,7 @@
 
 mod mapping;
 mod rpc;
+mod sandbox;
 pub mod siwc;
 
 use crate::{
@@ -51,6 +52,8 @@ struct Detection {
 }
 
 struct AppServer {
+    operation: tokio::sync::Mutex<()>,
+    sandbox: Mutex<Option<SandboxStatus>>,
     peer: Arc<RpcPeer>,
     child: Mutex<Option<std::process::Child>>,
     /// Owns the whole process tree (Codex and helpers such as `git`); dropping it ends them.
@@ -90,6 +93,7 @@ struct ServerRequest {
 }
 
 struct PendingApproval {
+    available_decisions: Option<Vec<ApprovalDecision>>,
     session_id: String,
     server: Arc<AppServer>,
     rpc_id: Value,
@@ -185,7 +189,8 @@ impl CodexProvider {
                 .active
                 .lock()
                 .map(|active| !active.is_empty())
-                .unwrap_or(true);
+                .unwrap_or(true)
+                || server.operation.try_lock().is_err();
             if !server.peer.is_closed() && (fresh || busy) {
                 return Ok(Arc::clone(server));
             }
@@ -244,6 +249,8 @@ impl CodexProvider {
                     "model_providers.openai_chatgpt_plan.supports_websockets=false",
                     "shell_environment_policy.inherit=\"core\"",
                     "shell_environment_policy.ignore_default_excludes=false",
+                    "sandbox_mode=\"workspace-write\"",
+                    "approval_policy=\"on-request\"",
                 ]
                 .into_iter()
                 .flat_map(|value| ["-c", value]),
@@ -298,6 +305,8 @@ impl CodexProvider {
             }
         };
         let server = Arc::new(AppServer {
+            operation: tokio::sync::Mutex::new(()),
+            sandbox: Mutex::default(),
             peer: Arc::clone(&peer),
             child: Mutex::new(Some(child)),
             group: Mutex::new(group),
@@ -461,6 +470,7 @@ impl CodexProvider {
         server: &Arc<AppServer>,
         state: &TurnState,
         session_id: &str,
+        read_only: bool,
         events: &mpsc::Sender<EventPayload>,
         request: ServerRequest,
     ) {
@@ -468,16 +478,31 @@ impl CodexProvider {
         let params = &params;
         let (kind, title, detail) = match method.as_str() {
             "item/commandExecution/requestApproval" => {
-                let command = str_at(params, "command")
-                    .map(str::to_string)
-                    .or_else(|| {
-                        params
-                            .pointer("/networkApprovalContext/host")
-                            .and_then(Value::as_str)
-                            .map(|host| format!("Сетевой доступ к {host}"))
-                    })
-                    .unwrap_or_else(|| "Команда без описания".into());
-                ("command", "Codex хочет выполнить команду", command)
+                if let Some(host) = params
+                    .pointer("/networkApprovalContext/host")
+                    .and_then(Value::as_str)
+                {
+                    let protocol = params
+                        .pointer("/networkApprovalContext/protocol")
+                        .and_then(Value::as_str)
+                        .unwrap_or("сеть");
+                    (
+                        "network",
+                        "Codex запрашивает сетевой доступ",
+                        format!("{protocol}: {host}"),
+                    )
+                } else {
+                    let command = str_at(params, "command")
+                        .map(str::to_string)
+                        .or_else(|| {
+                            params
+                                .pointer("/networkApprovalContext/host")
+                                .and_then(Value::as_str)
+                                .map(|host| format!("Сетевой доступ к {host}"))
+                        })
+                        .unwrap_or_else(|| "Команда без описания".into());
+                    ("command", "Codex хочет выполнить команду", command)
+                }
             }
             "item/fileChange/requestApproval" => {
                 let detail = str_at(params, "grantRoot")
@@ -501,11 +526,21 @@ impl CodexProvider {
                 return;
             }
         };
+        if read_only {
+            let _ = decline_unhandled(&server.peer, id, &method).await;
+            let _ = events.send(EventPayload::ToolActivity {
+                label: "Дополнительный доступ отклонён".into(),
+                detail: "В режиме «Только чтение» выход из песочницы и разрешение записи недоступны. Измените доступ агента перед следующим запуском задачи.".into(),
+            }).await;
+            return;
+        }
         let approval = Uuid::new_v4().to_string();
+        let available_decisions = sandbox::approval_decisions(params);
         if let Ok(mut approvals) = self.approvals.lock() {
             approvals.insert(
                 approval.clone(),
                 PendingApproval {
+                    available_decisions: available_decisions.clone(),
                     session_id: session_id.to_string(),
                     server: Arc::clone(server),
                     rpc_id: id,
@@ -515,6 +550,7 @@ impl CodexProvider {
         }
         let _ = events
             .send(EventPayload::ApprovalRequested {
+                available_decisions,
                 id: approval,
                 kind: kind.into(),
                 title: title.into(),
@@ -685,11 +721,17 @@ impl AgentProvider for CodexProvider {
         });
         if credentials.plan_enabled() {
             match self.server(account).await {
-                Ok(server) => match server.peer.request("account/rateLimits/read", json!({}), REQUEST_TIMEOUT).await {
+                Ok(server) => {
+                    status.sandbox = Some(sandbox::readiness(&server).await);
+                    match server.peer.request("account/rateLimits/read", json!({}), REQUEST_TIMEOUT).await {
                     Ok(value) => apply_rate_limits(&value, &mut status),
                     Err(_) => status.message = Some("Вход выполнен. CLI не предоставил снимок лимитов; попробуйте обновить позже.".into()),
-                },
-                Err(_) => status.message = Some("Вход выполнен. CLI пока недоступен для проверки лимитов.".into()),
+                    }
+                }
+                Err(_) => {
+                    status.message =
+                        Some("Вход выполнен. CLI пока недоступен для проверки лимитов.".into())
+                }
             }
         }
         Ok(status)
@@ -874,6 +916,11 @@ impl AgentProvider for CodexProvider {
             ));
         }
         let server = self.server(&request.account).await?;
+        let operation = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            operation = server.operation.lock() => operation,
+        };
+        sandbox::ensure_ready(&server).await?;
         let thread = self.open_thread(&server, &request, &events).await?;
         let mut incoming = server.peer.subscribe();
         if let Ok(mut active) = server.active.lock() {
@@ -881,6 +928,7 @@ impl AgentProvider for CodexProvider {
                 return Err(CoreError::Busy);
             }
         }
+        drop(operation);
         let result = self
             .drive_turn(&server, &request, &thread, &events, &mut incoming, &cancel)
             .await;
@@ -899,6 +947,17 @@ impl AgentProvider for CodexProvider {
     ) -> Result<()> {
         let pending = {
             let mut approvals = self.approvals.lock().map_err(|_| CoreError::Busy)?;
+            if approvals.get(approval_id).is_some_and(|pending| {
+                pending.session_id == session_id
+                    && pending
+                        .available_decisions
+                        .as_ref()
+                        .is_some_and(|choices| !choices.contains(&decision))
+            }) {
+                return Err(CoreError::Invalid(
+                    "Codex не предлагает это решение для данного запроса".into(),
+                ));
+            }
             match approvals.get(approval_id) {
                 Some(pending) if pending.session_id == session_id => approvals.remove(approval_id),
                 _ => None,
@@ -928,6 +987,18 @@ impl AgentProvider for CodexProvider {
             })
             .await;
         Ok(())
+    }
+
+    async fn setup_sandbox(&self, account: &AccountProfile) -> Result<SandboxStatus> {
+        let server = self.server(account).await?;
+        let result = sandbox::setup(&server).await;
+        let _ = self.account_events.send(AccountEvent {
+            account_id: account.id.clone(),
+            kind: "updated".into(),
+            status: None,
+            message: None,
+        });
+        result
     }
 
     async fn release_account(&self, account: &AccountProfile) {
@@ -1109,6 +1180,7 @@ impl CodexProvider {
                             server,
                             &state,
                             &request.session.id,
+                            request.session.permission_profile == "read_only",
                             events,
                             ServerRequest { id, method, params },
                         )

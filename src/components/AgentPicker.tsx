@@ -195,8 +195,8 @@ export function AgentPicker({
             value={value.permission_profile}
             onChange={(e) => change({ ...value, permission_profile: e.target.value })}
           >
-            <option value="standard">Чтение и изменения проекта · с подтверждениями</option>
-            <option value="workspace_auto">Автоправки внутри проекта</option>
+            <option value="standard">По правилам провайдера</option>
+            <option value="workspace_auto">Авто в проекте</option>
             <option value="read_only">Только чтение</option>
           </select>
           <small className="muted">

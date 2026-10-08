@@ -50,16 +50,16 @@ export function TeamComposerAgents({
                 a.permission_profile === 'read_only'
                   ? 'Только чтение'
                   : a.permission_profile === 'workspace_auto'
-                    ? 'Автоправки проекта · ограничения CLI сохраняются'
-                    : 'Изменения проекта с подтверждениями'
+                    ? 'Авто в проекте · дополнительный доступ требует подтверждения'
+                    : 'Доступ по правилам провайдера'
               }
             >
               <ShieldCheck size={12} />
               {a.permission_profile === 'read_only'
                 ? 'Чтение'
                 : a.permission_profile === 'workspace_auto'
-                  ? 'Автоправки'
-                  : 'Изменения'}
+                  ? 'Авто'
+                  : 'По правилам'}
             </span>
             <Settings2 size={13} />
           </button>

@@ -561,7 +561,7 @@ function TurnStep({
 
 const decisionLabels: Record<string, string> = {
   allow_once: 'Разрешено один раз',
-  allow_session: 'Разрешено до конца сессии',
+  allow_session: 'Разрешено для этого действия в контексте агента',
   deny: 'Отклонено',
   expired: 'Запрос закрыт без ответа',
 };
@@ -587,6 +587,8 @@ function ApprovalCard({
       .finally(() => setBusy(false));
   };
   const pending = !approval.decision;
+  const offered = (decision: ApprovalDecision) =>
+    approval.available_decisions == null || approval.available_decisions.includes(decision);
   return (
     <div
       className={`approval-card ${pending ? 'pending' : 'resolved'}`}
@@ -611,22 +613,39 @@ function ApprovalCard({
         </p>
       )}
       {approval.reason && <p className="approval-meta">Причина: {approval.reason}</p>}
+      {pending && (
+        <p className="approval-meta">
+          Подтверждение относится к этому запросу агента. Разрешение на контекст не включает
+          остальные команды и других участников команды. Авторежим работает в границах песочницы.
+        </p>
+      )}
       {pending && actionable && (
         <div className="approval-actions">
-          <button className="secondary-button" disabled={busy} onClick={() => answer('deny')}>
-            Отклонить
-          </button>
-          <button
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => answer('allow_session')}
-          >
-            Разрешить на сессию
-          </button>
-          <button className="primary-button" disabled={busy} onClick={() => answer('allow_once')}>
-            Разрешить один раз
-          </button>
+          {offered('deny') && (
+            <button className="secondary-button" disabled={busy} onClick={() => answer('deny')}>
+              Отклонить
+            </button>
+          )}
+          {offered('allow_session') && (
+            <button
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => answer('allow_session')}
+            >
+              Разрешить в этом контексте
+            </button>
+          )}
+          {offered('allow_once') && (
+            <button className="primary-button" disabled={busy} onClick={() => answer('allow_once')}>
+              Разрешить один раз
+            </button>
+          )}
         </div>
+      )}
+      {pending && approval.available_decisions?.length === 0 && (
+        <p className="notice">
+          CLI предлагает неподдерживаемое решение. Остановите задачу и обновите Codex CLI.
+        </p>
       )}
       {pending && !actionable && <p className="muted small">Запрос больше не активен.</p>}
       {error && <p className="notice error">{error}</p>}
