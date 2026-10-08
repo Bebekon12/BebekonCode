@@ -35,6 +35,7 @@ import { WelcomeHero } from './components/WelcomeHero';
 import { NewSession } from './components/NewSessionDialog';
 import { CommandPalette } from './components/CommandPalette';
 import { PlanWelcome } from './components/PlanWelcome';
+import { TeamComposerAgents } from './components/TeamComposerAgents';
 import { ChatControls } from './components/ChatControls';
 import { ChatSettings } from './components/ChatSettings';
 import { TeamPanel } from './components/TeamPanel';
@@ -480,6 +481,8 @@ export function App() {
         startSession={(id) => {
           openNewChat('single', id);
         }}
+        accountState={accountState}
+        openUsage={(provider) => client && void action(() => client.openUsage(provider))}
         preview={browserPreview}
       />
 
@@ -610,28 +613,39 @@ export function App() {
                 <Composer
                   controls={
                     client && (
-                      <ChatControls
-                        client={client}
-                        session={session}
-                        busy={busy}
-                        configure={(config) =>
-                          void action(async () => {
-                            const updated = await client.configureSession(session.id, config);
-                            setData((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    sessions: current.sessions.map((s) =>
-                                      s.id === updated.id ? updated : s,
-                                    ),
-                                  }
-                                : current,
-                            );
-                          })
-                        }
-                        settings={() => setAgentDialog({ id: session.id, handoff: false })}
-                        handoff={() => setAgentDialog({ id: session.id, handoff: true })}
-                      />
+                      <>
+                        {session.chat_mode !== 'single' && (
+                          <TeamComposerAgents
+                            session={session}
+                            sessions={data?.sessions ?? []}
+                            busy={busy || running}
+                            configure={(id) => setAgentDialog({ id, handoff: false })}
+                          />
+                        )}
+                        <ChatControls
+                          team={session.chat_mode !== 'single'}
+                          client={client}
+                          session={session}
+                          busy={busy}
+                          configure={(config) =>
+                            void action(async () => {
+                              const updated = await client.configureSession(session.id, config);
+                              setData((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      sessions: current.sessions.map((s) =>
+                                        s.id === updated.id ? updated : s,
+                                      ),
+                                    }
+                                  : current,
+                              );
+                            })
+                          }
+                          settings={() => setAgentDialog({ id: session.id, handoff: false })}
+                          handoff={() => setAgentDialog({ id: session.id, handoff: true })}
+                        />
+                      </>
                     )
                   }
                   ref={composer}
@@ -752,6 +766,20 @@ export function App() {
         <FileManager
           key={workspace.id}
           client={client}
+          onDiscuss={
+            session
+              ? (prompt) => {
+                  // Stay within the core's UTF-8 byte limit, including non-Latin text.
+                  const draft =
+                    prompt.length > 10000
+                      ? `${prompt.slice(0, 9800)}\n\n[Список сокращён до размера сообщения. Полные замечания доступны в просмотре файла.]`
+                      : prompt;
+                  setDrafts((current) => ({ ...current, [session.id]: draft }));
+                  setDialog(null);
+                  composer.current?.focus();
+                }
+              : undefined
+          }
           workspace={workspace}
           close={() => setDialog(null)}
         />

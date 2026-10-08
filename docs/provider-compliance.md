@@ -144,3 +144,18 @@ Live inference requires the user's own login; fixture tests do not prove live su
   documents stable release metadata used by the manual checker.
 
 Recheck these sources before changing provider behavior or shipping a new provider integration.
+
+## Team briefing and controls (0.7.0, checked 2026-10-08)
+
+Rechecked the official [Codex app-server reference](https://learn.chatgpt.com/docs/app-server),
+[Claude CLI reference](https://code.claude.com/docs/en/cli-reference), and
+[Claude permissions](https://code.claude.com/docs/en/permissions). No new provider endpoints or
+authentication modes are introduced. Model sliders use only the existing provider catalog.
+The two enforced access profiles remain read-only and standard; parallel workers stay read-only.
+Every team worker, review round and synthesis receives an explicit application briefing with
+the roster, role, shared goal, actual round limits and the fact that there is no direct peer-call tool.
+Questions travel in worker results through the existing bounded review round; the app does not claim
+unrestricted autonomous delegation. Provider safeguards and account binding are unchanged.
+Quota UI uses existing official snapshots only, with checked-at times and explicit unknown/error states.
+Document review reads local allowlisted Office XML and text; app-owned comments are stored locally
+in a new migration, never inserted into provider configuration or Office files.

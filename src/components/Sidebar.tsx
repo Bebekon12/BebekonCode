@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import type { CreateChat, Session, Snapshot, Workspace } from '../contracts';
 import { displayPath, sessionTitle } from '../locale';
+import type { AccountState } from '../accounts';
+import { SubscriptionLimits } from './SubscriptionLimits';
 import { usePreference } from '../preferences';
 
 const chatGroups = [
@@ -45,6 +47,8 @@ export function Sidebar({
   selectSession,
   startSession,
   preview,
+  accountState,
+  openUsage,
 }: {
   data: Snapshot | null;
   workspace?: Workspace;
@@ -64,6 +68,8 @@ export function Sidebar({
   selectSession: (session: Session) => void;
   startSession: (projectId: string) => void;
   preview: boolean;
+  accountState: AccountState;
+  openUsage: (provider: string) => void;
 }) {
   const [projectStates, setProjectStates] = usePreference<Record<string, boolean>>(
     'project-folders',
@@ -239,6 +245,12 @@ export function Sidebar({
         })}
       </div>
       <div className="sidebar-bottom">
+        <SubscriptionLimits
+          accounts={data?.accounts ?? []}
+          state={accountState}
+          collapsed={collapsed}
+          openUsage={openUsage}
+        />
         <button
           className="sidebar-footer-button"
           onClick={() => showSettings('Провайдеры')}

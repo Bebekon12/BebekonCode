@@ -12,6 +12,57 @@ struct AppState {
 }
 type IpcResult<T> = Result<T, String>;
 
+#[tauri::command]
+async fn review_document(
+    workspace_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> IpcResult<agent_core::review::ReviewDocument> {
+    state
+        .core
+        .review_document(&workspace_id, &path)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn review_comments(
+    workspace_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::review::ReviewComment>> {
+    state
+        .core
+        .review_comments(&workspace_id, &path)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn add_review_comment(
+    workspace_id: String,
+    path: String,
+    input: agent_core::review::NewComment,
+    state: State<'_, AppState>,
+) -> IpcResult<agent_core::review::ReviewComment> {
+    state
+        .core
+        .add_review_comment(&workspace_id, &path, input)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn resolve_review_comment(
+    workspace_id: String,
+    id: String,
+    resolved: bool,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .resolve_review_comment(&workspace_id, &id, resolved)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum FileOperation {
@@ -553,6 +604,10 @@ fn main() {
             check_releases,
             open_releases,
             file_operation,
+            review_document,
+            review_comments,
+            add_review_comment,
+            resolve_review_comment,
             open_project,
             prepare_update
         ])

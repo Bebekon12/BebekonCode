@@ -43,6 +43,7 @@ test('team creation exposes independent participant settings and auto mode', asy
   await wizard.getByRole('button', { name: 'Добавить участника' }).click();
   await expect(wizard.locator('.chat-agent-card')).toHaveCount(3);
   await expect(wizard.getByLabel('Доступ', { exact: true }).nth(1)).toBeDisabled();
+  await wizard.locator('.agent-card-toggle').nth(1).click();
   await wizard.getByLabel('Роль', { exact: true }).nth(1).fill('Архитектор');
   await page.screenshot({ path: 'test-results/team-creation.png' });
   await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
@@ -74,13 +75,17 @@ test('reasoning and handoff remain in the same chat', async ({ page }) => {
   await page.locator('.new-session-button').click();
   await expect(page.getByLabel('Провайдер', { exact: true })).toHaveValue('openai');
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
-  await page.getByLabel('Рассуждение в чате').selectOption('high');
-  await expect(page.getByLabel('Рассуждение в чате')).toHaveValue('high');
+  await page.getByRole('button', { name: 'Модель в чате', exact: true }).click();
+  await page.getByLabel('Уровень обдумывания').fill('3');
+  await expect(page.getByLabel('Уровень обдумывания')).toHaveValue('3');
+  await page.getByRole('button', { name: 'Готово', exact: true }).click();
   const chats = await page.locator('.recent-chat').count();
   await page.getByRole('button', { name: 'Перейти', exact: true }).click();
   const transition = page.getByRole('dialog', { name: 'Перейти с контекстом' });
   await transition.getByLabel('Провайдер', { exact: true }).selectOption('mock');
   await transition.getByRole('button', { name: 'Перейти с контекстом', exact: true }).click();
-  await expect(page.getByLabel('Модель в чате')).toHaveValue('mock-stream-v1');
+  await expect(page.getByRole('button', { name: 'Модель в чате', exact: true })).toContainText(
+    'Локальное демо',
+  );
   await expect(page.locator('.recent-chat')).toHaveCount(chats);
 });

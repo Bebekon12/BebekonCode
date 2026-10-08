@@ -13,6 +13,7 @@ const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'bebekon-native-'));
 const project = path.join(fixture, 'проект с пробелами');
 await fs.mkdir(project);
 await fs.writeFile(path.join(project, 'hello.txt'), 'Hello from the real disk.\r\n');
+await fs.writeFile(path.join(project, 'план.csv'), 'Задача,Статус\nДизайн,Готово');
 execFileSync('git', ['init', '--quiet'], { cwd: project, windowsHide: true, stdio: 'pipe' });
 execFileSync('git', ['add', 'hello.txt'], { cwd: project, windowsHide: true, stdio: 'pipe' });
 const port = 9237;
@@ -186,6 +187,39 @@ try {
   await page.getByRole('button', { name: 'hello.txt', exact: true }).click();
   await fs.mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/native-files.png' });
+  // Real file review, app-owned SQLite comments, reopen and stale-file protection.
+  await page.getByRole('button', { name: 'план.csv', exact: true }).click();
+  await page.locator('[data-review-anchor="csv:B2"]').click();
+  await page.getByLabel('Новый комментарий').fill('Проверить статус в настоящем файле');
+  await page.getByRole('dialog').getByRole('button', { name: 'Добавить', exact: true }).click();
+  await expect(page.locator('.review-comment')).toContainText('Проверить статус в настоящем файле');
+  assert.equal(
+    await fs.readFile(path.join(project, 'план.csv'), 'utf8'),
+    'Задача,Статус\nДизайн,Готово',
+  );
+  await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Файлы проекта', exact: true }).click();
+  await page.getByRole('button', { name: 'план.csv', exact: true }).click();
+  await expect(page.locator('.review-comment')).toContainText('Проверить статус в настоящем файле');
+  await fs.writeFile(path.join(project, 'план.csv'), 'Задача,Статус\nДизайн,Изменено извне');
+  await page.locator('[data-review-anchor="csv:B2"]').click();
+  await page.getByLabel('Новый комментарий').fill('Устаревшая версия');
+  await page.getByRole('dialog').getByRole('button', { name: 'Добавить', exact: true }).click();
+  await expect(page.locator('.document-review [role="alert"]')).toContainText(
+    'Файл изменился на диске',
+  );
+  await page.getByRole('button', { name: 'Отменить комментарий', exact: true }).click();
+  await page
+    .locator('.review-toolbar')
+    .getByRole('button', { name: 'Обновить', exact: true })
+    .click();
+  await expect(page.locator('.review-comment')).toContainText('Предыдущая версия файла');
+  await page.screenshot({ path: 'test-results/native-review.png' });
+  console.log(
+    'PASS: native CSV review, persisted SQLite comments, unchanged source and stale-version rejection',
+  );
+
   await page.getByRole('dialog').getByRole('button', { name: 'Закрыть окно', exact: true }).click();
   // The published SQL seed/defaults stay unchanged; old built-in labels localize on display.
   await page.getByRole('button', { name: 'Изменения', exact: true }).click();

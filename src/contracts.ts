@@ -181,6 +181,10 @@ export interface UpdateProgress {
   total: number | null;
 }
 export interface ClientTransport {
+  reviewDocument(workspaceId: string, path: string): Promise<ReviewDocument>;
+  reviewComments(workspaceId: string, path: string): Promise<ReviewComment[]>;
+  addReviewComment(workspaceId: string, path: string, input: NewComment): Promise<ReviewComment>;
+  resolveReviewComment(workspaceId: string, id: string, resolved: boolean): Promise<void>;
   listFiles(workspaceId: string, path: string): Promise<FileEntry[]>;
   readFile(workspaceId: string, path: string): Promise<string>;
   saveFile(workspaceId: string, path: string, expected: string, content: string): Promise<void>;
@@ -227,4 +231,28 @@ export interface FileEntry {
   directory: boolean;
   blocked: boolean;
   size: number;
+}
+
+export interface ReviewDocument {
+  kind: string;
+  fingerprint: string;
+  text: string | null;
+  parts: { name: string; content: string }[];
+}
+export interface ReviewComment {
+  id: string;
+  workspace_id: string;
+  path: string;
+  fingerprint: string;
+  anchor: string;
+  quote: string;
+  body: string;
+  resolved: boolean;
+  created_at: number;
+}
+export interface NewComment {
+  fingerprint: string;
+  anchor: string;
+  quote: string;
+  body: string;
 }

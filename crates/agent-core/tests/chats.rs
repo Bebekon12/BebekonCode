@@ -380,6 +380,12 @@ async fn team_exchanges_results_and_cancellation_stops_all_workers() {
     settle(&core, &chat.id).await;
     {
         let requests = probe.requests.lock().unwrap();
+        assert!(requests
+            .iter()
+            .all(|r| r.prompt.contains("мультиагентном чате BebekonCode")));
+        assert!(requests.iter().all(|r| r
+            .prompt
+            .contains("прямого канала или инструмента вызова коллег у тебя нет")));
         assert_eq!(
             requests
                 .iter()

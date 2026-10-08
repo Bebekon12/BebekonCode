@@ -12,6 +12,7 @@ pub mod process;
 pub mod provider;
 pub mod redaction;
 pub mod releases;
+pub mod review;
 mod runtime;
 pub mod secret_file;
 pub mod storage;

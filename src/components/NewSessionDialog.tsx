@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Network, Layers, Plus, X } from 'lucide-react';
+import { MessageSquare, Network, Layers, Plus, X, ChevronDown, Settings2 } from 'lucide-react';
 import type { AgentConfig, ClientTransport, CreateChat, Snapshot } from '../contracts';
 import type { AccountState } from '../accounts';
 import { defaultAgent, modeLabels } from '../chat';
@@ -27,6 +27,7 @@ export function NewSession({
   create: (input: CreateChat) => void;
   busy: boolean;
 }) {
+  const [expanded, setExpanded] = useState(0);
   const [mode, setMode] = useState<CreateChat['mode']>(initialMode);
   const [project, setProject] = useState(initialProject === 'chat-scratch' ? '' : initialProject);
   const [agents, setAgents] = useState<AgentConfig[]>(() =>
@@ -47,6 +48,7 @@ export function NewSession({
       ),
   );
   const changeMode = (next: CreateChat['mode']) => {
+    setExpanded(0);
     setMode(next);
     if (next === 'single') setAgents((current) => current.slice(0, 1));
     else if (next === 'team' && agents.length === 1)
@@ -101,7 +103,25 @@ export function NewSession({
           {agents.map((agent, index) => (
             <section className="chat-agent-card" key={index}>
               <div className="chat-agent-heading">
-                <strong>{index === 0 ? 'Основной агент' : `Участник ${index + 1}`}</strong>
+                <button
+                  type="button"
+                  className="agent-card-toggle"
+                  aria-expanded={expanded === index}
+                  onClick={() => setExpanded(expanded === index ? -1 : index)}
+                >
+                  <span className={`provider-mark ${agent.provider}`}>
+                    {agent.provider === 'anthropic' ? '✳' : agent.provider === 'openai' ? '◎' : '◇'}
+                  </span>
+                  <span>
+                    <strong>{index === 0 ? 'Основной агент' : `Участник ${index + 1}`}</strong>
+                    <small>
+                      {agent.model === 'mock-stream-v1' ? 'Демо' : agent.model || 'Выберите модель'}{' '}
+                      · {agent.role || 'Без роли'}
+                    </small>
+                  </span>
+                  <Settings2 size={15} />
+                  <ChevronDown size={14} />
+                </button>
                 {index > 0 && (
                   <button
                     type="button"
@@ -113,15 +133,17 @@ export function NewSession({
                   </button>
                 )}
               </div>
-              <AgentPicker
-                client={client}
-                data={data}
-                value={agent}
-                worker={index > 0}
-                change={(value) =>
-                  setAgents((current) => current.map((a, i) => (i === index ? value : a)))
-                }
-              />
+              <div hidden={expanded !== index}>
+                <AgentPicker
+                  client={client}
+                  data={data}
+                  value={agent}
+                  worker={index > 0}
+                  change={(value) =>
+                    setAgents((current) => current.map((a, i) => (i === index ? value : a)))
+                  }
+                />
+              </div>
             </section>
           ))}
         </div>
@@ -138,12 +160,13 @@ export function NewSession({
           <button
             type="button"
             className="secondary-button"
-            onClick={() =>
+            onClick={() => {
+              setExpanded(agents.length);
               setAgents((current) => [
                 ...current,
                 { ...defaultAgent(data), permission_profile: 'read_only', role: 'Исследователь' },
-              ])
-            }
+              ]);
+            }}
           >
             <Plus size={14} /> Добавить участника
           </button>

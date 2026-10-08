@@ -7,6 +7,7 @@ import type {
   AgentEvent,
   ApprovalDecision,
   ClientTransport,
+  ReviewComment,
   Snapshot,
 } from './contracts';
 import pkg from '../package.json';
@@ -99,11 +100,51 @@ function previewStatus(accountId: string): AccountStatus {
   };
 }
 
+const reviewComments: ReviewComment[] = [];
 export const preview: ClientTransport = {
+  reviewDocument: async (_workspaceId, path) => ({
+    kind: path.split('.').at(-1) ?? 'txt',
+    fingerprint: 'preview-document-v1',
+    text: path.endsWith('.csv')
+      ? 'Задача,Статус,Исполнитель\nДизайн,Готово,Claude\nПроверка,В работе,GPT'
+      : '# Обзор проекта\n\nВыберите абзац или ячейку, чтобы оставить комментарий.\nКомментарии сохраняются в приложении отдельно от документа.',
+    parts: [],
+  }),
+  reviewComments: async (workspaceId, path) =>
+    structuredClone(
+      reviewComments.filter((c) => c.workspace_id === workspaceId && c.path === path),
+    ),
+  addReviewComment: async (workspaceId, path, input) => {
+    const c = {
+      ...input,
+      id: crypto.randomUUID(),
+      workspace_id: workspaceId,
+      path,
+      resolved: false,
+      created_at: now(),
+    };
+    reviewComments.push(c);
+    return structuredClone(c);
+  },
+  resolveReviewComment: async (workspaceId, id, resolved) => {
+    const c = reviewComments.find((c) => c.id === id && c.workspace_id === workspaceId);
+    if (!c) throw new Error('Комментарий не найден');
+    c.resolved = resolved;
+  },
   listFiles: async () => {
+    if (new URLSearchParams(location.search).has('review'))
+      return ['обзор.md', 'задачи.csv'].map((name) => ({
+        name,
+        path: name,
+        directory: false,
+        blocked: false,
+        size: 128,
+      }));
     throw new Error('Файлы проекта доступны в приложении для Windows.');
   },
   readFile: async () => {
+    if (new URLSearchParams(location.search).has('review'))
+      return '# Обзор проекта\n\nПлан работы команды.\n\nКомментарий к этому абзацу.';
     throw new Error('Редактор файлов доступен в приложении для Windows.');
   },
   saveFile: async () => {

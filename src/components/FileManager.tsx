@@ -11,6 +11,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import type { ClientTransport, FileEntry, Workspace } from '../contracts';
+import { DocumentReview } from './DocumentReview';
 import { Dialog } from './Dialog';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -20,11 +21,16 @@ export function FileManager({
   client,
   workspace,
   close,
+  onDiscuss,
 }: {
   client: ClientTransport;
   workspace: Workspace;
   close: () => void;
+  onDiscuss?: (prompt: string) => void;
 }) {
+  const [review, setReview] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [reviewKey, setReviewKey] = useState(0);
   const [directory, setDirectory] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selected, setSelected] = useState<FileEntry | null>(null);
@@ -39,7 +45,7 @@ export function FileManager({
   const [name, setName] = useState('');
   const [decision, setDecision] = useState<(() => void) | null>(null);
   const loading = useRef(false);
-  const dirty = editable && content !== original.replace(/\r\n/g, '\n');
+  const dirty = reviewDirty || (editable && content !== original.replace(/\r\n/g, '\n'));
   const locked = busy || !!decision;
 
   useEffect(() => {
@@ -97,6 +103,8 @@ export function FileManager({
     else action();
   }
   function clearEditor() {
+    setReview(false);
+    setReviewDirty(false);
     setSelected(null);
     setEditable(false);
     setOriginal('');
@@ -115,7 +123,7 @@ export function FileManager({
       setBusy(false);
     }
   }
-  function open(entry: FileEntry) {
+  function open(entry: FileEntry, source = false) {
     guard(() => {
       clearEditor();
       setNotice('');
@@ -124,6 +132,11 @@ export function FileManager({
         return;
       }
       setSelected(entry);
+      if (!source && /\.(docx|xlsx|csv|tsv)$/i.test(entry.path)) {
+        setReview(true);
+        setReviewKey((k) => k + 1);
+        return;
+      }
       void perform(async () => {
         const text = await client.readFile(workspace.id, entry.path);
         setOriginal(text);
@@ -165,7 +178,10 @@ export function FileManager({
         </code>
         {decision && (
           <div className="notice file-decision" role="alert">
-            <span>Не сохранять изменения в файле «{selected?.name}»?</span>
+            <span>
+              Не сохранять {reviewDirty ? 'черновик комментария к файлу' : 'изменения в файле'} «
+              {selected?.name}»?
+            </span>
             <button autoFocus className="button" onClick={() => setDecision(null)}>
               Продолжить редактирование
             </button>
@@ -358,7 +374,7 @@ export function FileManager({
               </code>
               <button
                 className="button primary"
-                disabled={locked || !dirty}
+                disabled={locked || !dirty || !editable || review}
                 onClick={() => void save()}
               >
                 <Save size={14} /> Сохранить
@@ -377,6 +393,8 @@ export function FileManager({
                   onClick={() =>
                     guard(() => {
                       setEditable(false);
+                      setReview(false);
+                      setReviewDirty(false);
                       setOperation('rename');
                       setName(selected.path);
                     })
@@ -390,6 +408,8 @@ export function FileManager({
                   onClick={() =>
                     guard(() => {
                       setEditable(false);
+                      setReview(false);
+                      setReviewDirty(false);
                       setOperation('delete');
                     })
                   }
@@ -398,7 +418,42 @@ export function FileManager({
                 </button>
               </div>
             )}
-            {editable ? (
+            {selected && /\.(docx|xlsx|csv|tsv|md|txt)$/i.test(selected.path) && (
+              <div className="review-mode-switch">
+                <button
+                  className={review ? 'selected' : ''}
+                  disabled={locked || review}
+                  onClick={() =>
+                    guard(() => {
+                      setEditable(false);
+                      setReview(true);
+                      setReviewKey((k) => k + 1);
+                    })
+                  }
+                >
+                  Просмотр и комментарии
+                </button>
+                {!/\.(docx|xlsx)$/i.test(selected.path) && (
+                  <button
+                    className={!review ? 'selected' : ''}
+                    disabled={locked || !review}
+                    onClick={() => open(selected, true)}
+                  >
+                    Исходный текст
+                  </button>
+                )}
+              </div>
+            )}
+            {review && selected ? (
+              <DocumentReview
+                key={`${selected.path}:${reviewKey}`}
+                client={client}
+                workspaceId={workspace.id}
+                path={selected.path}
+                onDirty={setReviewDirty}
+                onDiscuss={onDiscuss}
+              />
+            ) : editable ? (
               <textarea
                 aria-label="Содержимое файла"
                 className="file-content"
@@ -416,7 +471,7 @@ export function FileManager({
             ) : (
               <div className="file-editor-empty">
                 <File size={28} />
-                <p>Откройте текстовый файл UTF-8 для редактирования.</p>
+                <p>Откройте текстовый файл, документ или таблицу.</p>
                 <span className="muted small">
                   До 2 МиБ · Ctrl S — сохранить · изменения записываются на ваш диск
                 </span>

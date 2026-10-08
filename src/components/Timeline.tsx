@@ -1,3 +1,5 @@
+import { ChatMarkdown } from './ChatMarkdown';
+import { ThinkingIndicator } from './ThinkingIndicator';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -248,13 +250,21 @@ export function Timeline({
               <div className="step-head">
                 <div className="step-title">
                   <strong>
-                    {running
-                      ? team
-                        ? 'Команда работает…'
-                        : 'Агент работает…'
-                      : turns.length
-                        ? 'Сессия продолжается…'
-                        : 'Над чем будем работать?'}
+                    {running ? (
+                      <ThinkingIndicator
+                        label={
+                          waitingApproval
+                            ? 'Ждёт подтверждения…'
+                            : team
+                              ? 'Команда работает…'
+                              : 'Агент работает…'
+                        }
+                      />
+                    ) : interrupted ? (
+                      'Сессия продолжается…'
+                    ) : (
+                      'Над чем будем работать?'
+                    )}
                   </strong>
                   <small>
                     {running && waitingApproval
@@ -433,14 +443,15 @@ function TurnStep({
         ))}
       {open && team && !turn.text && turn.status === 'running' && live && filter !== 'tools' && (
         <div className="team-progress" role="status">
-          <LoaderCircle size={17} className="spin" />
-          <span>
-            {turn.activities.some((activity) => activity.label === 'Сборка результата')
-              ? 'Собираем общий ответ…'
-              : turn.activities.some((activity) => activity.label === 'Обсуждение в команде')
-                ? 'Участники проверяют результаты…'
-                : 'Команда выполняет задачу…'}
-          </span>
+          <ThinkingIndicator
+            label={
+              turn.activities.some((activity) => activity.label === 'Сборка результата')
+                ? 'Собираем общий ответ…'
+                : turn.activities.some((activity) => activity.label === 'Обсуждение в команде')
+                  ? 'Участники проверяют результаты…'
+                  : 'Команда выполняет задачу…'
+            }
+          />
         </div>
       )}
       {open && filter !== 'tools' && (turn.text || (!team && turn.status === 'running')) && (
@@ -454,8 +465,11 @@ function TurnStep({
               {!team && !demo && <span className="muted">· {model}</span>}
             </div>
             <div className="prose">
-              {turn.text}
-              {turn.status === 'running' && live && <span className="stream-caret" />}
+              {turn.text ? (
+                <ChatMarkdown text={turn.text} streaming={turn.status === 'running' && live} />
+              ) : (
+                <ThinkingIndicator />
+              )}
             </div>
           </div>
         </div>

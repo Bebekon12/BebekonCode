@@ -5,6 +5,12 @@ import { checkUpdate, installUpdate } from './updates';
 import type { AccountEvent, AgentEvent, ClientTransport } from './contracts';
 
 export const desktop: ClientTransport = {
+  reviewDocument: (workspaceId, path) => invoke('review_document', { workspaceId, path }),
+  reviewComments: (workspaceId, path) => invoke('review_comments', { workspaceId, path }),
+  addReviewComment: (workspaceId, path, input) =>
+    invoke('add_review_comment', { workspaceId, path, input }),
+  resolveReviewComment: (workspaceId, id, resolved) =>
+    invoke('resolve_review_comment', { workspaceId, id, resolved }),
   listFiles: (workspaceId, path) =>
     invoke('file_operation', { workspaceId, operation: { kind: 'list', path } }),
   readFile: (workspaceId, path) =>

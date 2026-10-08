@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ArrowRightLeft, Puzzle } from 'lucide-react';
 import type { AgentConfig, ClientTransport, ModelInfo, Session } from '../contracts';
-import { effortLabels, sessionConfig } from '../chat';
+import { sessionConfig } from '../chat';
 import { errorText } from '../locale';
+import { ModelPicker } from './ModelPicker';
 
 export function ChatControls({
   client,
@@ -11,6 +12,7 @@ export function ChatControls({
   configure,
   settings,
   handoff,
+  team = false,
 }: {
   client: ClientTransport;
   session: Session;
@@ -18,6 +20,7 @@ export function ChatControls({
   configure: (config: AgentConfig) => void;
   settings: () => void;
   handoff: () => void;
+  team?: boolean;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [error, setError] = useState('');
@@ -33,61 +36,20 @@ export function ChatControls({
       alive = false;
     };
   }, [client, session.account_profile_id]);
-  const model = models.find((m) => m.id === session.model);
   const disabled = busy || session.status === 'running';
   return (
     <div className="chat-controls">
       <div className="chat-control-fields">
-        <label>
-          <span className="sr-only">Модель</span>
-          <select
-            aria-label="Модель в чате"
-            title="Модель"
-            disabled={disabled || !models.length}
-            value={session.model}
-            onChange={(e) =>
-              configure({
-                ...sessionConfig(session),
-                model: e.target.value,
-                reasoning_effort: null,
-              })
+        {!team && (
+          <ModelPicker
+            models={models}
+            model={session.model}
+            effort={session.reasoning_effort}
+            disabled={disabled}
+            change={(model, reasoning_effort) =>
+              configure({ ...sessionConfig(session), model, reasoning_effort })
             }
-          >
-            {models.length ? (
-              models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {session.provider === 'mock' ? 'Локальное демо' : m.name}
-                </option>
-              ))
-            ) : (
-              <option value={session.model}>
-                {session.provider === 'mock' ? 'Локальное демо' : session.model}
-              </option>
-            )}
-          </select>
-        </label>
-        {!!model?.reasoning_efforts?.length && (
-          <label>
-            <span className="sr-only">Рассуждение</span>
-            <select
-              aria-label="Рассуждение в чате"
-              title="Уровень рассуждения"
-              disabled={disabled || !model?.reasoning_efforts?.length}
-              value={session.reasoning_effort ?? ''}
-              onChange={(e) =>
-                configure({ ...sessionConfig(session), reasoning_effort: e.target.value || null })
-              }
-            >
-              <option value="">
-                {model?.reasoning_efforts?.length ? 'По умолчанию' : 'Недоступно'}
-              </option>
-              {model?.reasoning_efforts?.map((e) => (
-                <option key={e} value={e}>
-                  {effortLabels[e] ?? e}
-                </option>
-              ))}
-            </select>
-          </label>
+          />
         )}
         <label>
           <span className="sr-only">Доступ</span>

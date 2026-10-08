@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Puzzle, Server, Sparkles } from 'lucide-react';
+import { Puzzle, Server, Sparkles, Search } from 'lucide-react';
 import type { ClientTransport, Extensions, Session, Snapshot } from '../contracts';
 import { accountLabel, errorText } from '../locale';
 import { Dialog } from './Dialog';
@@ -18,8 +18,13 @@ export function ExtensionsDialog({
   close: () => void;
 }) {
   const [accountId, setAccountId] = useState(
-    session?.account_profile_id ?? data.accounts[0]?.id ?? '',
+    session?.account_profile_id ??
+      data.accounts.find((a) => a.provider !== 'mock' && a.auth_status === 'signed_in')?.id ??
+      data.accounts[0]?.id ??
+      '',
   );
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
   const [inventory, setInventory] = useState<Extensions>();
   const [error, setError] = useState('');
   useEffect(() => {
@@ -78,6 +83,34 @@ export function ExtensionsDialog({
           {error}
         </p>
       ))}
+      <div className="extension-toolbar">
+        <label className="model-search">
+          <Search size={17} />
+          <input
+            aria-label="Поиск инструментов"
+            placeholder="Поиск плагинов, MCP и навыков…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+        <div className="extension-tabs">
+          {[
+            ['all', 'Все'],
+            ['plugins', 'Плагины'],
+            ['mcp_servers', 'MCP'],
+            ['skills', 'Навыки'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              className={category === id ? 'selected' : ''}
+              aria-pressed={category === id}
+              onClick={() => setCategory(id!)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="extension-catalog">
         {inventory &&
           (
@@ -86,25 +119,48 @@ export function ExtensionsDialog({
               ['mcp_servers', 'MCP-серверы', Server],
               ['skills', 'Навыки', Sparkles],
             ] as const
-          ).map(([kind, label, Icon]) => (
-            <section key={kind}>
-              <h3>
-                <Icon size={18} /> {label}
-              </h3>
-              {!inventory[kind].length && <p className="muted small">Нет подключённых</p>}
-              {inventory[kind].map((item) => (
-                <div className="extension-catalog-row" key={item.id ?? item.name}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    {item.detail && <small>{item.detail}</small>}
+          )
+            .filter(([kind]) => category === 'all' || category === kind)
+            .map(([kind, label, Icon]) => (
+              <section key={kind}>
+                <h3>
+                  <Icon size={18} /> {label}
+                </h3>
+                {!inventory[kind].filter((item) =>
+                  `${item.name} ${item.detail ?? ''}`.toLowerCase().includes(query.toLowerCase()),
+                ).length && (
+                  <div className="extension-empty">
+                    <Icon size={25} />
+                    <p>{query ? 'Ничего не найдено' : 'Пока нет подключённых'}</p>
+                    <span className="small muted">
+                      {query
+                        ? 'Попробуйте другое название.'
+                        : 'Расширения появляются здесь после установки в официальном CLI аккаунта.'}
+                    </span>
                   </div>
-                  <span className="muted small">
-                    {item.enabled && item.status !== 'unsupported' ? 'Подключён' : 'Недоступен'}
-                  </span>
-                </div>
-              ))}
-            </section>
-          ))}
+                )}
+                {inventory[kind]
+                  .filter((item) =>
+                    `${item.name} ${item.detail ?? ''}`.toLowerCase().includes(query.toLowerCase()),
+                  )
+                  .map((item) => (
+                    <div className="extension-catalog-row" key={item.id ?? item.name}>
+                      <div>
+                        <span className="extension-item-icon">
+                          <Icon size={20} />
+                        </span>
+                        <strong>{item.name}</strong>
+                        {item.detail && <small>{item.detail}</small>}
+                      </div>
+                      <span
+                        className={`badge ${item.enabled && item.status !== 'unsupported' ? 'success' : ''}`}
+                      >
+                        {item.enabled && item.status !== 'unsupported' ? 'Подключён' : 'Недоступен'}
+                      </span>
+                    </div>
+                  ))}
+              </section>
+            ))}
       </div>
       <p className="muted small">
         Установка новых расширений здесь пока недоступна. Показаны инструменты из официального CLI

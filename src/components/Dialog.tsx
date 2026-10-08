@@ -21,11 +21,12 @@ export function Dialog({
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const element = ref.current;
-    const focusable = () => [
-      ...(element?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input, select, textarea, a[href], [tabindex="0"]',
-      ) ?? []),
-    ];
+    const focusable = () =>
+      [
+        ...(element?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input, select, textarea, a[href], [tabindex="0"]',
+        ) ?? []),
+      ].filter((item) => !item.hasAttribute('disabled') && item.getClientRects().length > 0);
     focusable()[0]?.focus();
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

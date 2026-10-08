@@ -9,7 +9,7 @@ import type {
   ToolPolicy,
 } from '../contracts';
 import { accountLabel, errorText } from '../locale';
-import { effortLabels } from '../chat';
+import { ReasoningSlider } from './ModelPicker';
 
 export function AgentPicker({
   client,
@@ -94,11 +94,13 @@ export function AgentPicker({
         </p>
       )}
       {value.provider === 'anthropic' && (
-        <p className="small muted">
-          Claude использует официальный CLI и отдельный вход. Sonnet, Opus и Haiku — псевдонимы CLI;
-          доступ к модели проверяет Anthropic при запросе. В Windows доступны файлы проекта;
-          оболочка, плагины и MCP пока недоступны.
-        </p>
+        <details className="small muted">
+          <summary>Возможности Claude в Windows</summary>
+          <p>
+            Модель и доступ проверяет Anthropic. Доступны файлы проекта; оболочка, плагины и MCP
+            пока недоступны.
+          </p>
+        </details>
       )}
       {!lockedAccount && (
         <div className="field-grid">
@@ -174,24 +176,11 @@ export function AgentPicker({
             ))}
           </select>
         </label>
-        <label className="field">
-          Уровень рассуждения
-          <select
-            aria-label="Уровень рассуждения"
-            value={value.reasoning_effort ?? ''}
-            disabled={!model?.reasoning_efforts?.length}
-            onChange={(e) => change({ ...value, reasoning_effort: e.target.value || null })}
-          >
-            <option value="">
-              {model?.reasoning_efforts?.length ? 'По умолчанию' : 'Провайдер не поддерживает'}
-            </option>
-            {model?.reasoning_efforts?.map((e) => (
-              <option key={e} value={e}>
-                {effortLabels[e] ?? e}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ReasoningSlider
+          model={model}
+          value={value.reasoning_effort}
+          change={(reasoning_effort) => change({ ...value, reasoning_effort })}
+        />
       </div>
       {error && (
         <p className="field-error" role="alert">
@@ -210,6 +199,9 @@ export function AgentPicker({
             <option value="standard">Чтение и изменения проекта · с подтверждениями</option>
             <option value="read_only">Только чтение</option>
           </select>
+          {worker && (
+            <small className="muted">Параллельный анализ: запись выполняет основной агент.</small>
+          )}
         </label>
         <label className="field">
           Роль

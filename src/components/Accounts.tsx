@@ -91,11 +91,6 @@ export function ProviderAccounts({
     <div className="provider-accounts">
       <div className="row-between">
         <strong className="section-label">Аккаунты</strong>
-        <span className="muted small">
-          {provider.id === 'anthropic'
-            ? 'Отдельная папка Claude и собственный вход Anthropic для каждого аккаунта'
-            : 'Отдельная регистрация Sign in with ChatGPT и папка Codex для каждого аккаунта'}
-        </span>
       </div>
       {accounts.map((account) => (
         <AccountCard
@@ -223,7 +218,7 @@ function AccountCard({
 
       {signedIn && status && (
         <>
-          <UsageBars usage={status.usage} />
+          {status.usage.length > 0 && <UsageBars usage={status.usage} />}
           {status.limit_reached && (
             <p className="notice warning-notice">
               Этот аккаунт достиг текущего лимита провайдера. BebekonCode не переключает аккаунты
@@ -231,7 +226,12 @@ function AccountCard({
             </p>
           )}
           {status.credits && <p className="muted small">Кредиты: {status.credits}</p>}
-          {status.message && <p className="muted small">{status.message}</p>}
+          {status.message && (
+            <details className="small muted">
+              <summary>Сведения аккаунта</summary>
+              <p>{status.message}</p>
+            </details>
+          )}
         </>
       )}
       {status?.manage_usage_url && (
@@ -293,7 +293,7 @@ function AccountCard({
         >
           <RefreshCw size={13} className={busy ? 'spin' : ''} /> Обновить
         </button>
-        {signedIn && (
+        {signedIn && account.provider !== 'anthropic' && (
           <button
             className="secondary-button"
             aria-expanded={showExtensions}

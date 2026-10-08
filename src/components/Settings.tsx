@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck } from 'lucide-react';
+import { RefreshCw, ShieldCheck, SlidersHorizontal, Cpu, Puzzle, Info } from 'lucide-react';
 import { Dialog } from './Dialog';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -54,6 +54,9 @@ export function Settings({
   close: () => void;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Основные');
+  const [providerId, setProviderId] = useState(
+    accounts.find((a) => a.provider !== 'mock')?.provider ?? 'openai',
+  );
   const [busy, setBusy] = useState(false);
   const [installing, setInstallingState] = useState(false);
   const setInstalling = (value: boolean) => {
@@ -102,11 +105,23 @@ export function Settings({
             (category) => (
               <button
                 key={category}
+                aria-label={category}
                 className={tab === category ? 'selected' : ''}
                 disabled={installing}
                 onClick={() => setTab(category)}
               >
-                {category}
+                {category === 'Основные' ? (
+                  <SlidersHorizontal size={17} />
+                ) : category === 'Провайдеры' ? (
+                  <Cpu size={17} />
+                ) : category === 'Разрешения' ? (
+                  <ShieldCheck size={17} />
+                ) : category === 'Возможности' ? (
+                  <Puzzle size={17} />
+                ) : (
+                  <Info size={17} />
+                )}
+                <span>{category === 'О программе и обновления' ? 'О программе' : category}</span>
               </button>
             ),
           )}
@@ -192,52 +207,76 @@ export function Settings({
                   <RefreshCw size={14} /> Обновить
                 </button>
               </div>
-              <p className="muted">
-                BebekonCode запускает официальные CLI провайдеров и не читает, не копирует и не
-                хранит их учётные данные.
-              </p>
-              {providers.map((provider) => (
-                <div className="provider-card" key={provider.id}>
-                  <div className="row-between">
-                    <strong>{provider.name}</strong>
-                    <span className={`badge ${provider.available ? 'success' : ''}`}>
-                      {provider.available
-                        ? 'Готов'
-                        : provider.detected_path
-                          ? 'Найден · не подключён'
-                          : 'Не найден'}
+              <div className="provider-tabs" aria-label="Выбрать провайдера">
+                {providers.map((p) => (
+                  <button
+                    key={p.id}
+                    aria-pressed={providerId === p.id}
+                    className={providerId === p.id ? 'selected' : ''}
+                    onClick={() => setProviderId(p.id)}
+                  >
+                    <span className={`provider-mark ${p.id}`}>
+                      {p.id === 'anthropic' ? '✳' : p.id === 'openai' ? '◎' : '◇'}
                     </span>
-                  </div>
-                  <p>{provider.detail}</p>
-                  {provider.detected_path && <code className="path">{provider.detected_path}</code>}
-                  {provider.id === 'openai' && !provider.available && (
-                    <div className="setup-hint">
-                      <strong>Установка Codex CLI</strong>
-                      <p>Выполните в терминале официальную команду и нажмите «Обновить»:</p>
-                      <code>npm install -g @openai/codex</code>
+                    <strong>
+                      {p.id === 'anthropic' ? 'Claude' : p.id === 'openai' ? 'ChatGPT' : 'Демо'}
+                    </strong>
+                    <small>{p.available ? 'Готов' : 'Нужна установка'}</small>
+                  </button>
+                ))}
+              </div>
+              {providers
+                .filter((p) => p.id === providerId)
+                .map((provider) => (
+                  <div className="provider-card" key={provider.id}>
+                    <div className="row-between">
+                      <strong>{provider.name}</strong>
+                      <span className={`badge ${provider.available ? 'success' : ''}`}>
+                        {provider.available
+                          ? 'Готов'
+                          : provider.detected_path
+                            ? 'Найден · не подключён'
+                            : 'Не найден'}
+                      </span>
                     </div>
-                  )}
-                  {provider.id === 'anthropic' && !provider.available && (
-                    <div className="setup-hint">
-                      <strong>Установка Claude Code для Windows</strong>
+                    <details className="provider-details small muted">
+                      <summary>О подключении и возможностях</summary>
+                      <p>{provider.detail}</p>
+                      {provider.detected_path && (
+                        <code className="path">{provider.detected_path}</code>
+                      )}
                       <p>
-                        Установите официальный нативный CLI по документации Anthropic. Для уже
-                        установленного CLI выполните:
+                        Вход выполняется через официальные средства провайдера. Аккаунты независимы.
                       </p>
-                      <code>claude update</code>
-                    </div>
-                  )}
-                  {['openai', 'anthropic'].includes(provider.id) && (
-                    <ProviderAccounts
-                      client={client}
-                      provider={provider}
-                      accounts={accounts.filter((account) => account.provider === provider.id)}
-                      state={accountState}
-                      onChanged={onAccountsChanged}
-                    />
-                  )}
-                </div>
-              ))}
+                    </details>
+                    {provider.id === 'openai' && !provider.available && (
+                      <div className="setup-hint">
+                        <strong>Установка Codex CLI</strong>
+                        <p>Выполните в терминале официальную команду и нажмите «Обновить»:</p>
+                        <code>npm install -g @openai/codex</code>
+                      </div>
+                    )}
+                    {provider.id === 'anthropic' && !provider.available && (
+                      <div className="setup-hint">
+                        <strong>Установка Claude Code для Windows</strong>
+                        <p>
+                          Установите официальный нативный CLI по документации Anthropic. Для уже
+                          установленного CLI выполните:
+                        </p>
+                        <code>claude update</code>
+                      </div>
+                    )}
+                    {['openai', 'anthropic'].includes(provider.id) && (
+                      <ProviderAccounts
+                        client={client}
+                        provider={provider}
+                        accounts={accounts.filter((account) => account.provider === provider.id)}
+                        state={accountState}
+                        onChanged={onAccountsChanged}
+                      />
+                    )}
+                  </div>
+                ))}
               <p className="small muted">
                 Аккаунты независимы: сессия всегда работает на выбранном при создании аккаунте, а
                 при исчерпании лимита приложение не переключается на другой автоматически.
@@ -275,14 +314,12 @@ export function Settings({
           {tab === 'Возможности' && (
             <>
               <h3>Возможности провайдеров</h3>
-              <p className="muted">
-                Привязки предусмотрены в схеме ядра и будут реализованы позже.
-              </p>
+              <p className="muted">Возможности зависят от официального CLI выбранного аккаунта.</p>
               <div className="provider-card">
                 <strong>Делегирование между агентами</strong>
                 <p>
-                  Пока недоступно. Требует явной привязки провайдера и аккаунта, а также
-                  подтверждения передачи задачи.
+                  Команда: до трёх участников, два параллельных анализа, один раунд обсуждения и
+                  общий итог. Авторазбиение: до четырёх подзадач. Модели и аккаунты выбираете вы.
                 </p>
               </div>
               <div className="provider-card">
@@ -305,8 +342,8 @@ export function Settings({
               </div>
               <p className="muted">{product.description}</p>
               <div className="notice">
-                Ранняя версия. Подключён официальный Codex app-server; адаптер Claude Code —
-                следующий этап.
+                Подключены официальные Codex app-server и Claude Code CLI. Для Claude в Windows
+                доступны файлы проекта; оболочка и расширения пока недоступны.
               </div>
               <UpdatePanel
                 client={client}
