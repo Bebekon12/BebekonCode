@@ -138,7 +138,17 @@ try {
     'Edited in the native desktop.\nснеговик',
     'Editor content changed before save: keyboard input reached the test window',
   );
-  await editor.press('Control+s');
+  await editor.evaluate((element) =>
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ы',
+        code: 'KeyS',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
   await page.getByText('Сохранено на диске.', { exact: true }).waitFor();
   assert.equal(
     await fs.readFile(path.join(project, 'hello.txt'), 'utf8'),

@@ -374,11 +374,17 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (dialog === 'files' || updateBusy) return; // File editor owns its unsaved-change navigation.
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.code === 'KeyK' || event.key.toLowerCase() === 'k')
+      ) {
         event.preventDefault();
         setDialog((current) => (current === 'commands' ? null : 'commands'));
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.code === 'KeyN' || event.key.toLowerCase() === 'n')
+      ) {
         event.preventDefault();
         if (dataRef.current) {
           setNewChatMode('single');

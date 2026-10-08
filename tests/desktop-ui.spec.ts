@@ -1,5 +1,34 @@
 import { test, expect } from '@playwright/test';
 
+test('chat and search shortcuts work with a Cyrillic keyboard layout', async ({ page }) => {
+  await page.goto('/?preview=1');
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'л',
+        code: 'KeyK',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  await expect(page.getByRole('textbox', { name: 'Поиск команд' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'т',
+        code: 'KeyN',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  await expect(page.getByRole('dialog', { name: 'Новый чат' })).toBeVisible();
+});
+
 test('project, session, streaming, stop and keyboard commands', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

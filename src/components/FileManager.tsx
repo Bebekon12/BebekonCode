@@ -462,7 +462,10 @@ export function FileManager({
                 disabled={locked}
                 onChange={(event) => setContent(event.target.value)}
                 onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+                  if (
+                    (event.ctrlKey || event.metaKey) &&
+                    (event.code === 'KeyS' || event.key.toLowerCase() === 's')
+                  ) {
                     event.preventDefault();
                     void save();
                   }
