@@ -29,8 +29,8 @@ pub fn evaluate(profile: &str, action: Action) -> Decision {
         (_, Credentials | SystemSettings) => Deny,
         ("read_only", ReadWorkspace | GitRead) => Allow,
         ("read_only", _) => Deny,
-        ("standard", ReadWorkspace | WriteWorkspace | GitRead) => Allow,
-        ("standard", _) => Ask,
+        ("standard" | "workspace_auto", ReadWorkspace | WriteWorkspace | GitRead) => Allow,
+        ("standard" | "workspace_auto", _) => Ask,
         _ => Deny,
     }
 }

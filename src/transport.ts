@@ -34,7 +34,8 @@ export const desktop: ClientTransport = {
   createChat: (input) => invoke('create_chat', { input }),
   configureSession: (sessionId, config) => invoke('configure_session', { sessionId, config }),
   handoff: (sessionId, config) => invoke('handoff_session', { sessionId, config }),
-  sendMessage: (sessionId, prompt) => invoke('send_message', { sessionId, prompt }),
+  sendMessage: (sessionId, prompt, attachments = []) =>
+    invoke('send_message', { sessionId, prompt, attachments }),
   cancel: (sessionId) => invoke('cancel_session', { sessionId }),
   events: (sessionId, before) => invoke('session_events', { sessionId, before: before ?? null }),
   subscribe: async (onEvent, onResync) => {
@@ -61,6 +62,8 @@ export const desktop: ClientTransport = {
   accountLogout: (accountId) => invoke('account_logout', { accountId }),
   accountModels: (accountId) => invoke('account_models', { accountId }),
   accountExtensions: (accountId) => invoke('account_extensions', { accountId }),
+  pluginCatalog: () => invoke('plugin_catalog'),
+  openCatalogSource: (provider) => invoke('open_catalog_source', { provider }),
   subscribeAccounts: (onEvent) =>
     listen<AccountEvent>('account-event', (event) => onEvent(event.payload)),
   resolveApproval: (sessionId, approvalId, decision) =>

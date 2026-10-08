@@ -30,7 +30,7 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   await expect(limits.locator('.limit-account')).toHaveCount(2);
   await expect(limits).toContainText('Мой Claude');
   await expect(limits).toContainText('Мой GPT');
-  await expect(limits).toContainText('Провайдер не сообщает остаток');
+  await expect(limits).toContainText('CLI не предоставил проценты лимитов');
   await expect(limits.getByRole('progressbar', { name: /Мой GPT: 5 часов/ })).toHaveAttribute(
     'value',
     '75',
@@ -55,7 +55,15 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   await page.locator('.composer-agent').first().click();
   const agentSettings = page.getByRole('dialog', { name: 'Настройки агента' });
   await expect(agentSettings.getByLabel('Модель', { exact: true })).toHaveValue('opus');
-  await expect(agentSettings.getByLabel('Уровень обдумывания')).toHaveValue('3');
+  await expect(
+    agentSettings.getByRole('slider', { name: 'Уровень обдумывания', exact: true }),
+  ).toHaveValue('3');
+  await agentSettings.getByLabel('Модель', { exact: true }).selectOption('claude-opus-4-6');
+  await expect(
+    agentSettings.getByRole('slider', { name: 'Уровень обдумывания', exact: true }),
+  ).toHaveAttribute('max', '4');
+  await agentSettings.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(page.locator('.composer-agent').first()).toContainText('claude-opus-4-6');
   await page.keyboard.press('Escape');
   const chats = await page.locator('.recent-chat').count();
   await page.getByRole('button', { name: 'Перейти', exact: true }).click();

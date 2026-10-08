@@ -3,6 +3,7 @@ mod guard;
 mod mapping;
 #[cfg(test)]
 mod tests;
+mod usage;
 
 use crate::{
     error::CoreError,
@@ -13,7 +14,7 @@ use crate::{
 };
 use async_trait::async_trait;
 pub use guard::hook_entry;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     ffi::OsString,
@@ -275,11 +276,92 @@ impl AgentProvider for ClaudeProvider {
                 ..AccountStatus::default()
             });
         }
-        self.auth_status(account).await
+        let mut status = self.auth_status(account).await?;
+        if status.state == "signed_in" {
+            let mut command = self.command(Some(account))?;
+            // Only built-in /usage; no tools, custom settings, project hooks or persistence.
+            command.args([
+                "--print",
+                "/usage",
+                "--output-format",
+                "json",
+                "--restricted",
+                "--tools",
+                "",
+                "--setting-sources",
+                "",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "{\"mcpServers\":{}}",
+                "--settings",
+                "{\"disableAllHooks\":true,\"enabledPlugins\":{}}",
+                "--no-session-persistence",
+            ]);
+            match capture(command, Duration::from_secs(20)).await {
+                Ok((true, bytes)) => {
+                    if let Some((windows, detail)) = serde_json::from_slice::<Value>(&bytes)
+                        .ok()
+                        .as_ref()
+                        .and_then(usage::parse)
+                    {
+                        status.limit_reached = windows
+                            .iter()
+                            .any(|window| window.used_percent >= 100.0)
+                            .then(|| "usage_limit".into());
+                        status.usage = windows;
+                        status.usage_detail = Some(detail);
+                    }
+                }
+                _ => {
+                    status.usage_detail =
+                        Some("Claude CLI не вернул данные /usage. Обновите позже.".into())
+                }
+            }
+        }
+        Ok(status)
     }
     async fn models(&self, _account: &AccountProfile) -> Result<Vec<ModelInfo>> {
         self.ready()?;
-        Ok([("sonnet", "Claude Sonnet"), ("opus", "Claude Opus"), ("haiku", "Claude Haiku")].into_iter().map(|(id, name)| ModelInfo { id: id.into(), name: name.into(), description: "Официальный псевдоним CLI; доступность проверяется Anthropic при запросе, это не каталог прав подписки.".into(), is_default: id == "sonnet", reasoning_efforts: ["low", "medium", "high", "xhigh", "max"].map(str::to_string).to_vec(), default_reasoning_effort: None }).collect())
+        Ok([
+            ("sonnet", "Claude Sonnet · авто"),
+            ("opus", "Claude Opus · авто"),
+            ("haiku", "Claude Haiku · авто"),
+            ("claude-opus-5-5", "Claude Opus 5.5"),
+            ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+            ("claude-haiku-5-5", "Claude Haiku 5.5"),
+            ("claude-opus-5", "Claude Opus 5"),
+            ("claude-sonnet-5", "Claude Sonnet 5"),
+            ("claude-opus-4-8", "Claude Opus 4.8"),
+            ("claude-opus-4-7", "Claude Opus 4.7"),
+            ("claude-opus-4-6", "Claude Opus 4.6"),
+            ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+            ("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ]
+        .into_iter()
+        .map(|(id, name)| ModelInfo {
+            id: id.into(),
+            name: name.into(),
+            description: if ["sonnet", "opus", "haiku"].contains(&id) {
+                "Псевдоним CLI: точная версия появится в ответе."
+            } else {
+                "Фиксированная версия. Доступность проверяет Anthropic при запросе."
+            }
+            .into(),
+            is_default: id == "sonnet",
+            reasoning_efforts: if id == "claude-haiku-4-5" {
+                vec![]
+            } else if ["claude-opus-4-6", "claude-sonnet-4-6"].contains(&id) {
+                ["low", "medium", "high", "max"]
+                    .map(str::to_string)
+                    .to_vec()
+            } else {
+                ["low", "medium", "high", "xhigh", "max"]
+                    .map(str::to_string)
+                    .to_vec()
+            },
+            default_reasoning_effort: None,
+        })
+        .collect())
     }
     async fn login(&self, account: &AccountProfile) -> Result<LoginStart> {
         self.ready()?;
@@ -355,7 +437,9 @@ impl AgentProvider for ClaudeProvider {
         {
             return Err(failure("Расширения Claude в Windows недоступны", None));
         }
-        if !["standard", "read_only"].contains(&request.session.permission_profile.as_str()) {
+        if !["standard", "read_only", "workspace_auto"]
+            .contains(&request.session.permission_profile.as_str())
+        {
             return Err(CoreError::Invalid("Неизвестный доступ Claude".into()));
         }
         if !self.models(&request.account).await?.iter().any(|model| {
@@ -463,15 +547,21 @@ impl ClaudeProvider {
             &request.session.permission_profile,
         );
         let mut command = self.command(Some(&request.account))?;
-        command.current_dir(root).args([
+        command.current_dir(&root).args([
             "--print",
             "--output-format",
             "stream-json",
             "--verbose",
             "--include-partial-messages",
+            "--input-format",
+            "stream-json",
             "--restricted",
             "--permission-mode",
-            "default",
+            if request.session.permission_profile == "workspace_auto" {
+                "acceptEdits"
+            } else {
+                "default"
+            },
             "--setting-sources",
             "",
             "--strict-mcp-config",
@@ -515,7 +605,33 @@ impl ClaudeProvider {
         let mut owned = OwnedChild::spawn(&mut command)?;
         let stdout = owned.child.stdout.take().ok_or(CoreError::Busy)?;
         let stdin = owned.child.stdin.take().ok_or(CoreError::Busy)?;
-        let prompt = request.prompt.clone();
+        let mut content = vec![json!({"type":"text", "text": request.prompt})];
+        for file in request
+            .attachments
+            .iter()
+            .filter(|file| file.mime.starts_with("image/"))
+        {
+            use base64::Engine;
+            let bytes = std::fs::read(crate::files::resolve(
+                &root,
+                Path::new(&file.path)
+                    .strip_prefix(&root)
+                    .or_else(|_| {
+                        Path::new(&file.path)
+                            .strip_prefix(root.to_string_lossy().trim_start_matches(r"\\?\"))
+                    })
+                    .map_err(|_| failure("Вложение за пределами проекта", None))?
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .as_str(),
+                false,
+            )?)?;
+            content.push(json!({"type":"image","source":{"type":"base64","media_type":file.mime,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}}));
+        }
+        let prompt = format!(
+            "{}\n",
+            json!({"type":"user","message":{"role":"user","content":content}})
+        );
         std::thread::Builder::new()
             .name("claude-prompt".into())
             .spawn(move || {

@@ -65,7 +65,7 @@ test('team has one shared answer and settings open without taking space from the
   await page.getByRole('button', { name: 'Настроить Рецензент', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: 'Настройки агента' }).getByLabel('Доступ', { exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.keyboard.press('Escape');
   await page.locator('.team-panel > summary').click();
   const input = page.getByRole('textbox', { name: 'Сообщение агенту' });
@@ -79,6 +79,7 @@ test('team has one shared answer and settings open without taking space from the
   await page.screenshot({ path: 'test-results/workspace-team-result.png' });
   await page.getByRole('button', { name: 'Плагины', exact: true }).click();
   const plugins = page.getByRole('dialog', { name: 'Плагины и инструменты' });
+  await plugins.getByRole('button', { name: 'Подключённые', exact: true }).click();
   await expect(plugins.getByText('Пример плагина', { exact: true })).toBeVisible();
   await expect(
     plugins.getByRole('button', { name: 'Рецензент · выбрать инструменты' }),

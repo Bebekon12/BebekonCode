@@ -4,6 +4,7 @@ import type { AgentConfig, ClientTransport, ModelInfo, Session } from '../contra
 import { sessionConfig } from '../chat';
 import { errorText } from '../locale';
 import { ModelPicker } from './ModelPicker';
+import { AccessPicker } from './AccessPicker';
 
 export function ChatControls({
   client,
@@ -51,21 +52,13 @@ export function ChatControls({
             }
           />
         )}
-        <label>
-          <span className="sr-only">Доступ</span>
-          <select
-            aria-label="Доступ в чате"
-            title="Доступ агента"
-            value={session.permission_profile}
-            disabled={disabled || !!session.parent_session_id}
-            onChange={(e) =>
-              configure({ ...sessionConfig(session), permission_profile: e.target.value })
-            }
-          >
-            <option value="standard">Изменения проекта</option>
-            <option value="read_only">Только чтение</option>
-          </select>
-        </label>
+        <AccessPicker
+          value={session.permission_profile}
+          disabled={disabled}
+          change={(permission_profile) =>
+            configure({ ...sessionConfig(session), permission_profile })
+          }
+        />
         <button
           className="secondary-button"
           title="Настроить плагины, MCP, навыки и роль"

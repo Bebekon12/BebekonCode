@@ -215,7 +215,7 @@ export const preview: ClientTransport = {
         provider: agent.provider,
         account_profile_id: agent.account_profile_id,
         model: agent.model,
-        permission_profile: index === 0 ? agent.permission_profile : 'read_only',
+        permission_profile: agent.permission_profile,
       });
       const stored = state.sessions.find((s) => s.id === session.id)!;
       Object.assign(stored, {
@@ -251,7 +251,7 @@ export const preview: ClientTransport = {
     });
     return crypto.randomUUID();
   },
-  sendMessage: async (sessionId, prompt) => {
+  sendMessage: async (sessionId, prompt, attachments = []) => {
     const session = state.sessions.find((session) => session.id === sessionId);
     if (!session || session.status === 'running') throw new Error('Сессия недоступна или занята');
     session.status = 'running';
@@ -270,6 +270,22 @@ export const preview: ClientTransport = {
       listeners.forEach((listener) => listener(event));
     };
     emit({ type: 'turn_started', prompt });
+    if (attachments.length)
+      emit({
+        type: 'user_attachments',
+        files: attachments.map((file) => ({
+          name: file.name,
+          mime: file.mime,
+          path: `Предпросмотр/${file.name}`,
+        })),
+      });
+    emit({
+      type: 'agent_configuration',
+      provider: session.provider,
+      model: session.model,
+      account_profile_id: session.account_profile_id,
+      reasoning_effort: session.reasoning_effort,
+    });
     void (async () => {
       // Preview-only sample rows for UI work; nothing here touches the disk.
       for (const [label, detail] of [
@@ -380,12 +396,15 @@ export const preview: ClientTransport = {
     if (account?.provider === 'mock')
       return [{ id: 'mock-stream-v1', name: 'mock-stream-v1', description: '', is_default: true }];
     if (account?.provider === 'anthropic')
-      return ['sonnet', 'opus', 'haiku'].map((id) => ({
+      return ['sonnet', 'opus', 'haiku', 'claude-opus-5-5', 'claude-opus-4-6'].map((id) => ({
         id,
         name: `Claude ${id}`,
         description: 'Псевдоним CLI · предпросмотр',
         is_default: id === 'sonnet',
-        reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        reasoning_efforts:
+          id === 'claude-opus-4-6'
+            ? ['low', 'medium', 'high', 'max']
+            : ['low', 'medium', 'high', 'xhigh', 'max'],
       }));
     return [
       {
@@ -397,6 +416,27 @@ export const preview: ClientTransport = {
       },
     ];
   },
+  pluginCatalog: async () => ({
+    checked_at: now(),
+    errors: [],
+    entries: [
+      {
+        name: 'github',
+        provider: 'openai',
+        description: 'Работа с репозиториями и задачами · пример каталога.',
+        category: 'Developer Tools',
+        source_url: 'https://github.com/openai/plugins',
+      },
+      {
+        name: 'code-review',
+        provider: 'anthropic',
+        description: 'Проверка изменений кода · пример каталога.',
+        category: 'development',
+        source_url: 'https://github.com/anthropics/claude-plugins-official',
+      },
+    ],
+  }),
+  openCatalogSource: async () => {},
   accountExtensions: async (accountId) =>
     state.accounts.find((a) => a.id === accountId)?.provider === 'anthropic'
       ? {

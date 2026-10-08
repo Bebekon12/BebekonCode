@@ -42,6 +42,7 @@ import { TeamPanel } from './components/TeamPanel';
 import { ProjectChanges } from './components/ProjectChanges';
 import { ExtensionsDialog } from './components/ExtensionsDialog';
 import { modeLabels } from './chat';
+import type { DraftAttachment } from './attachments';
 import { counted, errorText, sessionTitle, statusLabels } from './locale';
 
 export function App() {
@@ -51,6 +52,7 @@ export function App() {
   const [sessionId, setSessionId] = useState('');
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, DraftAttachment[]>>({});
   const [historyPage, setHistoryPage] = useState(false);
   const browsingHistory = useRef(historyPage);
   browsingHistory.current = historyPage;
@@ -98,6 +100,7 @@ export function App() {
   );
   const account = data?.accounts.find((account) => account.id === session?.account_profile_id);
   const draft = drafts[sessionId] ?? '';
+  const attachments = attachmentDrafts[sessionId] ?? [];
   const running = session?.status === 'running';
   const homeSessions =
     data?.sessions.filter(
@@ -351,16 +354,21 @@ export function App() {
     if (
       !client ||
       !session ||
-      !draft.trim() ||
+      (!draft.trim() && !attachments.length) ||
       busy ||
       running ||
       data?.sessions.some((s) => s.id === session.parent_session_id && s.status === 'running')
     )
       return;
-    const prompt = draft.trim();
+    const prompt = draft.trim() || 'Изучи прикреплённые файлы.';
     void action(async () => {
-      await client.sendMessage(session.id, prompt);
+      await client.sendMessage(
+        session.id,
+        prompt,
+        attachments.map(({ name, mime, data }) => ({ name, mime, data })),
+      );
       setDrafts((current) => ({ ...current, [session.id]: '' }));
+      setAttachmentDrafts((current) => ({ ...current, [session.id]: [] }));
     });
   };
   useEffect(() => {
@@ -611,6 +619,11 @@ export function App() {
                   }}
                 />
                 <Composer
+                  key={session.id}
+                  attachments={attachments}
+                  setAttachments={(value) =>
+                    setAttachmentDrafts((current) => ({ ...current, [session.id]: value }))
+                  }
                   controls={
                     client && (
                       <>

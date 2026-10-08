@@ -119,6 +119,7 @@ fn turn(root: &Path) -> TurnRequest {
         created_at: now(),
     };
     TurnRequest {
+        attachments: vec![],
         prompt: "Read project".into(),
         account,
         output_schema: None,

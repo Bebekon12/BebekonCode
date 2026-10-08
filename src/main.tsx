@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
+import './chat-polish.css';
 // Apply saved appearance before the first React paint, without storing provider data here.
 try {
   const theme = JSON.parse(localStorage.getItem('bebekoncode.ui.theme') ?? '"dark"');

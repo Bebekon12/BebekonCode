@@ -29,6 +29,9 @@ impl StreamState {
             Some("system") => {
                 match value.get("subtype").and_then(Value::as_str) {
                     Some("init") => {
+                        if let Some(model) = value.get("model").and_then(Value::as_str) {
+                            events.push(EventPayload::ModelResolved { model: model.into() });
+                        }
                         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
                             uuid::Uuid::parse_str(id).map_err(|_| failure("Некорректный ID сессии Claude", None))?;
                             events.push(EventPayload::ProviderSession { id: id.into() });
@@ -70,6 +73,13 @@ impl StreamState {
                 }
             }
             Some("result") => {
+                if let Some(usage) = value.get("modelUsage").and_then(Value::as_object) {
+                    if usage.len() == 1 {
+                        if let Some(model) = usage.keys().next() {
+                            events.push(EventPayload::ModelResolved { model: model.clone() });
+                        }
+                    }
+                }
                 if self.completed { return Err(failure("Повторный итог Claude CLI", None)); }
                 let subtype = value["subtype"].as_str().unwrap_or("");
                 if value["is_error"].as_bool() == Some(true) || subtype != "success" {

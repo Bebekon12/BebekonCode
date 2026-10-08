@@ -18,8 +18,19 @@ export interface TimelineTurn {
   id: string;
   prompt: string;
   text: string;
+  progress: string;
+  teamMessages: {
+    sessionId: string;
+    stageId: string;
+    title: string;
+    text: string;
+    model?: string | null;
+    reasoningEffort?: string | null;
+  }[];
   provider?: string;
   model?: string;
+  reasoningEffort?: string | null;
+  attachments: { name: string; path: string; mime: string }[];
   activities: TimelineActivity[];
   status: SessionStatus;
   startedAt: number;
@@ -43,6 +54,9 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
         id: event.run_id,
         prompt: '',
         text: '',
+        progress: '',
+        teamMessages: [],
+        attachments: [],
         activities: [],
         approvals: [],
         status: 'running',
@@ -57,9 +71,39 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
       case 'assistant_text_delta':
         turn.text += event.payload.text;
         break;
+      case 'progress_delta':
+        turn.progress += event.payload.text;
+        break;
+      case 'model_resolved':
+        turn.model = event.payload.model;
+        break;
+      case 'user_attachments':
+        turn.attachments = event.payload.files;
+        break;
+      case 'team_message': {
+        const payload = event.payload;
+        const stageId = payload.stage_id ?? '';
+        const existing = turn.teamMessages.find(
+          (m) => m.sessionId === payload.session_id && m.stageId === stageId,
+        );
+        if (existing) {
+          existing.text += payload.text;
+          if (payload.model) existing.model = payload.model;
+        } else
+          turn.teamMessages.push({
+            sessionId: payload.session_id,
+            stageId,
+            title: payload.title,
+            text: payload.text,
+            model: payload.model,
+            reasoningEffort: payload.reasoning_effort,
+          });
+        break;
+      }
       case 'agent_configuration':
         turn.provider = event.payload.provider;
         turn.model = event.payload.model;
+        turn.reasoningEffort = event.payload.reasoning_effort;
         break;
       case 'tool_activity':
         turn.activities.push({
@@ -116,7 +160,9 @@ export function filterTimeline(
     if (!needle) return true;
     const haystack = [
       filter === 'all' ? turn.prompt : '',
-      filter === 'tools' ? '' : turn.text,
+      filter === 'tools'
+        ? ''
+        : `${turn.text} ${turn.progress} ${turn.teamMessages.map((m) => `${m.title} ${m.text}`).join(' ')}`,
       filter === 'agent' ? '' : turn.activities.map((a) => `${a.label} ${a.detail}`).join(' '),
       turn.error ?? '',
       filter === 'agent' ? '' : turn.approvals.map((a) => `${a.title} ${a.detail}`).join(' '),

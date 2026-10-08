@@ -52,8 +52,8 @@ pub fn read(root: &Path, relative: &str) -> Result<ReviewDocument> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if !["docx", "xlsx", "csv", "tsv", "md", "txt"].contains(&extension.as_str()) {
-        return Err(invalid("Просмотр с комментариями поддерживает DOCX, XLSX, CSV, TSV, Markdown и TXT. PDF и старые DOC/XLS пока недоступны."));
+    if !["docx", "xlsx", "pptx", "csv", "tsv", "md", "txt"].contains(&extension.as_str()) {
+        return Err(invalid("Просмотр с комментариями поддерживает DOCX, XLSX, PPTX, CSV, TSV, Markdown и TXT. PDF и старые DOC/XLS пока недоступны."));
     }
     let file = std::fs::File::open(path)?;
     if !file.metadata()?.is_file() || file.metadata()?.len() > MAX_FILE {
@@ -71,7 +71,7 @@ pub fn read(root: &Path, relative: &str) -> Result<ReviewDocument> {
         text: None,
         parts: vec![],
     };
-    if !["docx", "xlsx"].contains(&extension.as_str()) {
+    if !["docx", "xlsx", "pptx"].contains(&extension.as_str()) {
         if bytes.len() > 2 * 1024 * 1024 || bytes.contains(&0) {
             return Err(invalid("Текстовый документ должен быть UTF-8 до 2 МиБ"));
         }
@@ -91,6 +91,16 @@ pub fn read(root: &Path, relative: &str) -> Result<ReviewDocument> {
         let name = entry.name().to_string();
         let wanted = if extension == "docx" {
             name == "word/document.xml"
+        } else if extension == "pptx" {
+            name == "ppt/presentation.xml"
+                || name == "ppt/_rels/presentation.xml.rels"
+                || ["ppt/slides/slide", "ppt/notesSlides/notesSlide"]
+                    .iter()
+                    .any(|prefix| {
+                        name.strip_prefix(prefix)
+                            .and_then(|n| n.strip_suffix(".xml"))
+                            .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+                    })
         } else {
             [
                 "xl/workbook.xml",
@@ -131,6 +141,8 @@ pub fn read(root: &Path, relative: &str) -> Result<ReviewDocument> {
     }
     let required = if extension == "docx" {
         "word/document.xml"
+    } else if extension == "pptx" {
+        "ppt/presentation.xml"
     } else {
         "xl/workbook.xml"
     };
@@ -280,6 +292,15 @@ mod tests {
             ],
         );
         assert_eq!(read(temp.path(), "ok.xlsx").unwrap().parts.len(), 2);
+        office(
+            &temp.path().join("ok.pptx"),
+            &[
+                ("ppt/presentation.xml", "<presentation/>"),
+                ("ppt/slides/slide1.xml", "<slide/>"),
+                ("ppt/vbaProject.bin", "not loaded"),
+            ],
+        );
+        assert_eq!(read(temp.path(), "ok.pptx").unwrap().parts.len(), 2);
     }
     #[tokio::test]
     async fn comments_persist_and_bind_to_workspace_and_file_version() {

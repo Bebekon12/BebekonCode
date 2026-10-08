@@ -76,6 +76,7 @@ export function useAccountState(
                 plan: previous.plan ?? update.plan,
                 limit_reached: update.limit_reached,
                 checked_at: update.checked_at,
+                usage_detail: update.usage_detail ?? previous.usage_detail,
               },
             };
           });

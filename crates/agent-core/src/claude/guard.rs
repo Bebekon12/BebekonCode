@@ -46,7 +46,7 @@ pub(super) fn settings(pipe: &str, executable: &Path, profile: &str) -> Value {
     if profile == "read_only" {
         deny.extend(["Edit", "Write"]);
     }
-    json!({"permissions":{"defaultMode":"default", "ask":["Edit","Write"], "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
+    json!({"permissions":{"defaultMode":if profile == "workspace_auto" { "acceptEdits" } else { "default" }, "ask":if profile == "workspace_auto" { vec![] } else { vec!["Edit","Write"] }, "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
 }
 
 fn response(event: &str, allowed: bool) -> Value {
@@ -268,12 +268,38 @@ pub(super) async fn decide(
             response(event, false)
         };
     }
-    if session.permission_profile != "standard" || cancel.is_cancelled() {
+    if !["standard", "workspace_auto"].contains(&session.permission_profile.as_str())
+        || cancel.is_cancelled()
+    {
         return response(event, false);
+    }
+    if session.permission_profile == "workspace_auto" {
+        return if event == "PreToolUse" {
+            // Keep provider deny rules effective; acceptEdits decides after our path check.
+            json!({})
+        } else {
+            // An unexpected provider approval is still forwarded to the user below.
+            // Automatic edits should not normally produce PermissionRequest.
+            return manual_decision(session, value, path, events, cancel, pending, grants).await;
+        };
     }
     if event == "PreToolUse" {
         return response(event, true);
     }
+    manual_decision(session, value, path, events, cancel, pending, grants).await
+}
+
+async fn manual_decision(
+    session: &Session,
+    value: Value,
+    path: PathBuf,
+    events: &mpsc::Sender<EventPayload>,
+    cancel: &CancellationToken,
+    pending: &Approvals,
+    grants: &Grants,
+) -> Value {
+    let event = "PermissionRequest";
+    let tool = value["tool_name"].as_str().unwrap_or("");
     if grants
         .lock()
         .is_ok_and(|grants| grants.contains(&(session.id.clone(), path.clone())))

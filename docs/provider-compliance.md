@@ -145,6 +145,66 @@ Live inference requires the user's own login; fixture tests do not prove live su
 
 Recheck these sources before changing provider behavior or shipping a new provider integration.
 
+## Workspace access, attachments and visible progress (checked 2026-10-08)
+
+### Follow-up verification (2026-10-08)
+
+- Codex quotas are requested through documented `account/rateLimits/read` and updated from
+  `account/rateLimits/updated`; failures mean unavailable, never a fabricated zero.
+- Claude's [TypeScript reference](https://platform.claude.com/docs/en/agent-sdk/typescript#sdkratelimitevent)
+  documents `rate_limit_event` (status, optional utilization/reset). These CLI events can be
+  displayed without accessing credentials. They are not a documented polling API for both quota
+  windows. The [status-line schema](https://code.claude.com/docs/en/statusline) includes 5h/7d
+  percentages and effective effort, but availability in a restricted print session is unconfirmed.
+- The same TypeScript reference documents `/usage` as a local command in SDK sessions. A native
+  CLI 2.1.294 isolated-profile probe confirmed `local_command=usage`, `num_turns=0`,
+  `duration_api_ms=0`, empty `modelUsage`, no inference. Account refresh invokes this command
+  with no tools, no project settings/hooks/MCP/plugins and no session persistence. Only that
+  explicitly identified zero-inference result is parsed. Recognized all-model session/week
+  percentages become quota windows; other formats remain raw CLI status without guessed values.
+  Reset text is displayed but is not guessed into a timestamp. Signed-in subscription data has
+  not yet been verified against a real account on this installation.
+- [CodexBar's own source documentation](https://github.com/steipete/CodexBar/blob/main/docs/claude.md)
+  describes credential-file/Keychain access, private OAuth/web endpoints, and interactive CLI
+  parsing. These do not establish provider authorization and are not adopted here.
+- Public discovery uses the official GitHub marketplace manifests in `openai/plugins` and
+  `anthropics/claude-plugins-official`. Browsing metadata does not install or execute plugins.
+  Codex `plugin/list` and install methods are explicitly marked under development in the
+  [app-server reference](https://learn.chatgpt.com/docs/app-server), so production code does
+  not invoke them. Unsupported installation/execution stays visible.
+- Model effort options follow the current [Claude model table](https://code.claude.com/docs/en/model-config#adjust-effort-level).
+  Selected effort is a request, not proof of the applied value: managed settings can silently
+  cap it in stream-JSON. The UI distinguishes requested/default effort from a reported value.
+- Image attachments are native image inputs. Office text is extracted locally. Other files,
+  including video/PDF/legacy Office, may be attached as local files; this does not imply native
+  video understanding, OCR, audio transcription, or an installed converter. The UI states this.
+
+Rechecked [Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Claude CLI](https://code.claude.com/docs/en/cli-reference),
+[Claude permissions](https://code.claude.com/docs/en/permissions),
+[Claude model configuration](https://code.claude.com/docs/en/model-config) and
+[headless operation](https://code.claude.com/docs/en/headless).
+
+- `workspace_auto` is an explicit per-agent choice. Claude uses documented `acceptEdits`,
+  retaining restricted tools, path-checking hooks and deny rules. Only validated project file
+  writes are accepted automatically. Codex retains `workspace-write` and `on-request`;
+  provider approval requests are always forwarded. No unrestricted or bypass mode is offered.
+- Team agents retain their selected access. Writers execute sequentially; read-only agents may
+  run two at a time. The review round is read-only to avoid duplicate edits.
+- Display actual Claude model IDs from `system/init.model` and `result.modelUsage`. Aliases are
+  labelled as aliases; explicitly versioned choices are documented IDs, not entitlement claims.
+- Visible progress means public status messages, tool activity, Codex reasoning summaries and
+  actual worker messages/results. Never request private chain-of-thought or persist Claude
+  thinking/signature blocks. No fabricated peer conversations.
+- Attachments are explicit user input, bounded and validated by Rust core. Local file copies
+  remain inside the selected workspace; images use documented Codex `localImage` input and
+  Claude stream-JSON image content. Unsupported formats are shown as unavailable.
+- Claude percentages are available only when the official zero-inference `/usage` response
+  actually includes supported quota windows. No cookies, unofficial quota endpoints,
+  guessed percentages or automatic account fallback are used.
+
+This section supersedes earlier statements that all team workers are necessarily read-only.
+
 ## Team briefing and controls (0.7.0, checked 2026-10-08)
 
 Rechecked the official [Codex app-server reference](https://learn.chatgpt.com/docs/app-server),

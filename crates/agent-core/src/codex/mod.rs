@@ -683,6 +683,15 @@ impl AgentProvider for CodexProvider {
         } else {
             "Вход выполнен, но использование плана ChatGPT не разрешено.".into()
         });
+        if credentials.plan_enabled() {
+            match self.server(account).await {
+                Ok(server) => match server.peer.request("account/rateLimits/read", json!({}), REQUEST_TIMEOUT).await {
+                    Ok(value) => apply_rate_limits(&value, &mut status),
+                    Err(_) => status.message = Some("Вход выполнен. CLI не предоставил снимок лимитов; попробуйте обновить позже.".into()),
+                },
+                Err(_) => status.message = Some("Вход выполнен. CLI пока недоступен для проверки лимитов.".into()),
+            }
+        }
         Ok(status)
     }
 
@@ -759,40 +768,12 @@ impl AgentProvider for CodexProvider {
             let peer = Arc::clone(&server.peer);
             async move { peer.request(method, params, REQUEST_TIMEOUT).await }
         };
-        let (plugins, mcp, skills) = tokio::join!(
-            request("plugin/list", json!({})),
+        let (mcp, skills) = tokio::join!(
             request("mcpServerStatus/list", json!({})),
             request("skills/list", json!({})),
         );
-        match plugins {
-            Ok(value) => {
-                for plugin in value
-                    .get("marketplaces")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .flat_map(|marketplace| {
-                        marketplace
-                            .get("plugins")
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                    })
-                    .filter(|plugin| plugin.get("installed").and_then(Value::as_bool) == Some(true))
-                {
-                    extensions.plugins.push(ExtensionItem {
-                        id: str_at(plugin, "id").unwrap_or_default().into(),
-                        name: str_at(plugin, "name").unwrap_or("Плагин").into(),
-                        detail: str_at(plugin, "version").map(str::to_string),
-                        enabled: plugin.get("enabled").and_then(Value::as_bool) == Some(true),
-                        status: None,
-                    });
-                }
-            }
-            Err(_) => extensions
-                .errors
-                .push("Не удалось получить список плагинов".into()),
-        }
+        // plugin/list is documented as under development and forbidden for production clients.
+        // Public discovery is implemented separately in catalog.rs; it grants no tool access.
         match mcp {
             Ok(mut value) => {
                 let mut pages = 0;
@@ -1022,7 +1003,7 @@ impl CodexProvider {
                 "turn/start",
                 json!({
                     "threadId": thread,
-                    "input": [{ "type": "text", "text": request.prompt }],
+                    "input": std::iter::once(json!({"type":"text", "text":request.prompt})).chain(request.attachments.iter().filter(|file| file.mime.starts_with("image/")).map(|file| json!({"type":"localImage", "path":file.path}))).collect::<Vec<_>>(),
                     "model": request.session.model,
                     "effort": effort,
                     "approvalPolicy": "on-request",

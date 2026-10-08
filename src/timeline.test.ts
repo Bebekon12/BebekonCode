@@ -9,6 +9,31 @@ const event = (sequence: number, run_id: string, payload: EventPayload): AgentEv
   timestamp: 0,
 });
 describe('event replay', () => {
+  it('keeps worker stages separate and updates the reported model without duplicating text', () => {
+    const message = {
+      type: 'team_message' as const,
+      session_id: 'worker',
+      title: 'Код',
+      reasoning_effort: 'high',
+    };
+    const [turn] = buildTimeline([
+      event(1, 'a', { ...message, stage_id: 'write', text: 'Готово' }),
+      event(2, 'a', { ...message, stage_id: 'write', text: '', model: 'claude-opus-4-6' }),
+      event(3, 'a', { ...message, stage_id: 'review', text: 'Проверено' }),
+      event(4, 'a', {
+        type: 'user_attachments',
+        files: [{ name: 'video.mp4', path: '/project/video.mp4', mime: 'video/mp4' }],
+      }),
+    ]);
+    expect(turn?.teamMessages).toHaveLength(2);
+    expect(turn?.teamMessages[0]).toMatchObject({
+      text: 'Готово',
+      model: 'claude-opus-4-6',
+      reasoningEffort: 'high',
+    });
+    expect(turn?.teamMessages[1]?.text).toBe('Проверено');
+    expect(turn?.attachments[0]?.name).toBe('video.mp4');
+  });
   it('deduplicates persisted events racing live events without losing text', () => {
     const first = event(1, 'a', { type: 'turn_started', prompt: 'Hello' });
     const second = event(2, 'a', { type: 'assistant_text_delta', text: 'Hi ' });

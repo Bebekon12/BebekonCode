@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Search, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Check, ChevronDown, Search, Sparkles, RotateCcw, Zap } from 'lucide-react';
 import type { ModelInfo } from '../contracts';
 import { effortLabels } from '../chat';
 
@@ -19,27 +19,57 @@ export function ReasoningSlider({
   return (
     <div className="reasoning-slider">
       <div>
-        <span>
-          <Sparkles size={14} /> Обдумывание
-        </span>
+        <Zap size={18} className="effort-icon" aria-hidden="true" />
         <strong>
           {levels.length === 1
             ? 'Недоступно'
             : index
               ? (effortLabels[levels[index] ?? ''] ?? levels[index])
-              : 'По умолчанию'}
+              : model?.default_reasoning_effort
+                ? `${effortLabels[model.default_reasoning_effort] ?? model.default_reasoning_effort} · авто`
+                : 'Авто'}
         </strong>
+        <button
+          type="button"
+          className="icon-button effort-reset"
+          aria-label="Сбросить уровень обдумывания"
+          disabled={disabled || levels.length === 1 || value === null}
+          onClick={() => change(null)}
+        >
+          <RotateCcw size={16} />
+        </button>
       </div>
-      <input
-        type="range"
-        aria-label="Уровень обдумывания"
-        min={0}
-        max={Math.max(1, levels.length - 1)}
-        step={1}
-        value={index}
-        disabled={disabled || levels.length === 1}
-        onChange={(e) => change(levels[Number(e.target.value)] || null)}
-      />
+      <p
+        className="effort-model"
+        title="Запрошенный уровень. Провайдер может ограничить его настройками аккаунта."
+      >
+        {model?.name ?? 'Выберите модель'}
+      </p>
+      <div className="effort-track">
+        <input
+          type="range"
+          aria-label="Уровень обдумывания"
+          min={0}
+          max={Math.max(1, levels.length - 1)}
+          step={1}
+          value={index}
+          aria-valuetext={
+            index ? (effortLabels[levels[index] ?? ''] ?? levels[index]) : 'По умолчанию'
+          }
+          style={
+            {
+              '--range-progress': `${levels.length > 1 ? (index / (levels.length - 1)) * 100 : 0}%`,
+            } as CSSProperties
+          }
+          disabled={disabled || levels.length === 1}
+          onChange={(e) => change(levels[Number(e.target.value)] || null)}
+        />
+        <div className="effort-dots" aria-hidden="true">
+          {levels.map((level) => (
+            <i key={level} />
+          ))}
+        </div>
+      </div>
       <div className="slider-caption">
         <span>Быстрее</span>
         <span>Глубже</span>
@@ -101,6 +131,11 @@ export function ModelPicker({
       >
         <Sparkles size={15} />
         <span>{model === 'mock-stream-v1' ? 'Локальное демо' : (active?.name ?? model)}</span>
+        {active?.reasoning_efforts?.length ? (
+          <small className="trigger-effort">
+            {effort ? (effortLabels[effort] ?? effort) : 'Авто'}
+          </small>
+        ) : null}
         <ChevronDown size={13} />
       </button>
       {open && (
@@ -127,12 +162,16 @@ export function ModelPicker({
                 >
                   <span>
                     <strong>{m.name}</strong>
+                    <code className="model-id">{m.id}</code>
                     {m.description && <small>{m.description}</small>}
                   </span>
                   {m.id === model && <Check size={16} />}
                 </button>
               ))}
           </div>
+          {!models.some((m) => `${m.name} ${m.id}`.toLowerCase().includes(query.toLowerCase())) && (
+            <p className="muted model-empty">Моделей по этому запросу нет.</p>
+          )}
           <ReasoningSlider
             model={active}
             value={effort}

@@ -103,7 +103,17 @@ export function SubscriptionLimits({
                       );
                     })}
                     {!s.usage.length && (
-                      <span className="limit-note">Провайдер не сообщает остаток</span>
+                      <span className="limit-note">
+                        {a.provider === 'anthropic'
+                          ? 'CLI не предоставил проценты лимитов'
+                          : 'CLI не предоставил остаток'}
+                      </span>
+                    )}
+                    {s.usage_detail && (
+                      <details className="limit-cli-detail">
+                        <summary>Статус Claude CLI</summary>
+                        <pre>{s.usage_detail}</pre>
+                      </details>
                     )}
                     {s.limit_reached && <span className="field-error">Лимит исчерпан</span>}
                     <button
@@ -129,7 +139,7 @@ export function SubscriptionLimits({
             );
           })}
           {connected.length > 0 && (
-            <span className="limit-note">Снимок данных · обновление вручную</span>
+            <span className="limit-note">Данные официального CLI · обновление вручную</span>
           )}
         </div>
       )}

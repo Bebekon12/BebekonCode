@@ -89,6 +89,24 @@ pub enum EventPayload {
     AssistantTextDelta {
         text: String,
     },
+    ProgressDelta {
+        text: String,
+    },
+    TeamMessage {
+        session_id: String,
+        #[serde(default)]
+        stage_id: String,
+        title: String,
+        text: String,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+    },
+    ModelResolved {
+        model: String,
+    },
+    UserAttachments {
+        files: Vec<crate::attachments::AttachedFile>,
+    },
     AgentConfiguration {
         provider: String,
         model: String,
@@ -138,6 +156,8 @@ pub enum ApprovalDecision {
 /// instead of being estimated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccountStatus {
+    #[serde(default)]
+    pub usage_detail: Option<String>,
     pub account_id: String,
     /// `signed_in`, `signed_out`, `not_required`, `unavailable` or `error`.
     pub state: String,

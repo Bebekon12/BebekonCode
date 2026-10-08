@@ -4,6 +4,11 @@ export interface Workspace {
   root: string;
   created_at: number;
 }
+export interface Attachment {
+  name: string;
+  mime: string;
+  data: string;
+}
 export interface AccountProfile {
   id: string;
   provider: string;
@@ -64,6 +69,18 @@ export interface CreateSession {
 export type EventPayload =
   | { type: 'turn_started'; prompt: string }
   | { type: 'assistant_text_delta'; text: string }
+  | { type: 'progress_delta'; text: string }
+  | { type: 'model_resolved'; model: string }
+  | { type: 'user_attachments'; files: { name: string; path: string; mime: string }[] }
+  | {
+      type: 'team_message';
+      session_id: string;
+      stage_id?: string;
+      title: string;
+      text: string;
+      model?: string | null;
+      reasoning_effort?: string | null;
+    }
   | {
       type: 'agent_configuration';
       provider: string;
@@ -92,6 +109,7 @@ export interface UsageWindow {
   source: string;
 }
 export interface AccountStatus {
+  usage_detail?: string | null;
   account_id: string;
   state: 'signed_in' | 'signed_out' | 'not_required' | 'unavailable' | 'error';
   email: string | null;
@@ -130,6 +148,18 @@ export interface Extensions {
   mcp_servers: ExtensionItem[];
   skills: ExtensionItem[];
   errors: string[];
+}
+export interface CatalogEntry {
+  name: string;
+  provider: string;
+  description: string;
+  category: string;
+  source_url: string;
+}
+export interface PluginCatalog {
+  entries: CatalogEntry[];
+  errors: string[];
+  checked_at: number;
 }
 export interface AgentEvent {
   sequence: number;
@@ -199,7 +229,7 @@ export interface ClientTransport {
   createChat(input: CreateChat): Promise<Session>;
   configureSession(sessionId: string, config: AgentConfig): Promise<Session>;
   handoff(sessionId: string, config: AgentConfig): Promise<string>;
-  sendMessage(sessionId: string, prompt: string): Promise<string>;
+  sendMessage(sessionId: string, prompt: string, attachments?: Attachment[]): Promise<string>;
   cancel(sessionId: string): Promise<void>;
   events(sessionId: string, before?: number): Promise<AgentEvent[]>;
   subscribe(onEvent: (event: AgentEvent) => void, onResync: () => void): Promise<() => void>;
@@ -212,6 +242,8 @@ export interface ClientTransport {
   accountLogout(accountId: string): Promise<void>;
   accountModels(accountId: string): Promise<ModelInfo[]>;
   accountExtensions(accountId: string): Promise<Extensions>;
+  pluginCatalog(): Promise<PluginCatalog>;
+  openCatalogSource(provider: string): Promise<void>;
   subscribeAccounts(onEvent: (event: AccountEvent) => void): Promise<() => void>;
   resolveApproval(sessionId: string, approvalId: string, decision: ApprovalDecision): Promise<void>;
   openUsage(provider: string): Promise<void>;

@@ -24,7 +24,7 @@ const child = spawn(binary, ['--data-dir', path.join(fixture, 'data')], {
     ...process.env,
     // Isolate appearance/preferences as well as the Rust database.
     WEBVIEW2_USER_DATA_FOLDER: path.join(fixture, 'webview-profile'),
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1 --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`,
   },
 });
 let browser;
@@ -60,6 +60,7 @@ try {
     await sleep(200);
   }
   assert(page, 'Native packaged page unavailable');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   if (process.argv.includes('--claude')) {
     const result = await page.evaluate(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -79,10 +80,14 @@ try {
     assert.equal(result.status.state, 'signed_out');
     assert.equal(result.status.email, null);
     assert.deepEqual(result.status.usage, []);
-    assert.deepEqual(
-      result.models.map((m) => m.id),
-      ['sonnet', 'opus', 'haiku'],
-    );
+    for (const id of ['sonnet', 'opus', 'haiku', 'claude-opus-5-5', 'claude-opus-4-6'])
+      assert(result.models.some((m) => m.id === id));
+    assert.deepEqual(result.models.find((m) => m.id === 'claude-opus-4-6').reasoning_efforts, [
+      'low',
+      'medium',
+      'high',
+      'max',
+    ]);
     assert(result.extensions.errors.length > 0);
     assert.deepEqual(result.extensions.plugins, []);
     console.log(
@@ -246,11 +251,56 @@ try {
   await page.getByRole('heading', { name: 'Над чем поработаем?', exact: true }).waitFor();
   assert.equal(await page.getByText('Local demo', { exact: true }).count(), 0);
   const composer = page.getByRole('textbox', { name: 'Сообщение агенту' });
+  await page.getByLabel('Выбрать вложения').setInputFiles([
+    {
+      name: 'вложение.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Локальное вложение UTF-8'),
+    },
+    {
+      name: 'photo.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    },
+  ]);
+  await expect(page.locator('.attachment-card')).toHaveCount(2);
   await composer.fill('Проверка русского интерфейса');
   await composer.press('Control+Enter');
   await page.getByText('Это ответ локального демо', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Остановить агента', exact: true }).click();
   await page.getByText(/^Остановлено вами/).waitFor();
+  await expect(page.locator('.sent-attachments')).toContainText('вложение.txt');
+  const savedAttachments = await fs.readdir(path.join(project, '.bebekon-attachments'));
+  assert.equal(savedAttachments.length, 2);
+  assert.equal(
+    await fs.readFile(
+      path.join(
+        project,
+        '.bebekon-attachments',
+        savedAttachments.find((name) => name.endsWith('-вложение.txt')),
+      ),
+      'utf8',
+    ),
+    'Локальное вложение UTF-8',
+  );
+  await page.reload();
+  await expect(page.locator('.sent-attachments')).toContainText('photo.png');
+  console.log(
+    'PASS: native file/image uploads, guarded disk copies and persisted attachment history',
+  );
+  const catalog = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('plugin_catalog'));
+  assert(
+    catalog.entries.some((entry) => entry.provider === 'openai'),
+    'OpenAI public catalog unavailable',
+  );
+  assert(
+    catalog.entries.some((entry) => entry.provider === 'anthropic'),
+    'Claude public catalog unavailable',
+  );
+  console.log(`PASS: native public catalogs (${catalog.entries.length} entries)`);
   await page.screenshot({ path: 'test-results/native-russian.png' });
   // New chat commands use real Rust + SQLite in this isolated profile.
   const agent = {

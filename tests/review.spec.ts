@@ -100,6 +100,27 @@ test('Office parser reads real XML parts, cached formulas and rejects external e
         },
       ],
     });
+    const pptx = parseReview({
+      ...base,
+      kind: 'pptx',
+      parts: [
+        {
+          name: 'ppt/presentation.xml',
+          content:
+            '<p:presentation xmlns:p="urn:p" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>',
+        },
+        {
+          name: 'ppt/_rels/presentation.xml.rels',
+          content:
+            '<Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/></Relationships>',
+        },
+        {
+          name: 'ppt/slides/slide1.xml',
+          content:
+            '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>План презентации</a:t></a:r></a:p></p:sld>',
+        },
+      ],
+    });
     let blocked = false;
     try {
       parseReview({
@@ -115,12 +136,13 @@ test('Office parser reads real XML parts, cached formulas and rejects external e
     } catch {
       blocked = true;
     }
-    return { doc, xlsx, blocked, csv: parseDelimited('a,b\n"line\nbreak","a""b"', ',') };
+    return { doc, xlsx, pptx, blocked, csv: parseDelimited('a,b\n"line\nbreak","a""b"', ',') };
   });
   expect(result.doc.blocks[0]!.text).toBe('Русский текст');
   expect(result.doc.sheets[0]!.rows).toEqual([['Ячейка']]);
   expect(result.xlsx.sheets[0]!.name).toBe('План');
   expect(result.xlsx.sheets[0]!.rows[1]).toEqual(['', '3', 'Готово']);
+  expect(result.pptx.blocks.map((block) => block.text)).toEqual(['Слайд 1', 'План презентации']);
   expect(result.csv.rows[1]).toEqual(['line\nbreak', 'a"b']);
   expect(result.blocked).toBe(true);
 });

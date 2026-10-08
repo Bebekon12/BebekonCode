@@ -132,7 +132,7 @@ export function FileManager({
         return;
       }
       setSelected(entry);
-      if (!source && /\.(docx|xlsx|csv|tsv)$/i.test(entry.path)) {
+      if (!source && /\.(docx|xlsx|pptx|csv|tsv)$/i.test(entry.path)) {
         setReview(true);
         setReviewKey((k) => k + 1);
         return;
@@ -418,7 +418,7 @@ export function FileManager({
                 </button>
               </div>
             )}
-            {selected && /\.(docx|xlsx|csv|tsv|md|txt)$/i.test(selected.path) && (
+            {selected && /\.(docx|xlsx|pptx|csv|tsv|md|txt)$/i.test(selected.path) && (
               <div className="review-mode-switch">
                 <button
                   className={review ? 'selected' : ''}
@@ -433,7 +433,7 @@ export function FileManager({
                 >
                   Просмотр и комментарии
                 </button>
-                {!/\.(docx|xlsx)$/i.test(selected.path) && (
+                {!/\.(docx|xlsx|pptx)$/i.test(selected.path) && (
                   <button
                     className={!review ? 'selected' : ''}
                     disabled={locked || !review}

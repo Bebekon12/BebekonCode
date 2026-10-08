@@ -81,7 +81,13 @@ export function TeamPanel({
                     : ''}
                 </span>
                 <small>
-                  {index === 0 ? 'Проверяет и собирает итог' : 'Анализирует проект · только чтение'}
+                  {index === 0
+                    ? 'Проверяет и собирает итог'
+                    : member.permission_profile === 'read_only'
+                      ? 'Анализирует проект · только чтение'
+                      : member.permission_profile === 'workspace_auto'
+                        ? 'Изменяет проект · автоправки'
+                        : 'Изменяет проект · с подтверждениями'}
                 </small>
               </div>
               <button

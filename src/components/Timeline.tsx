@@ -1,5 +1,7 @@
 import { ChatMarkdown } from './ChatMarkdown';
 import { ThinkingIndicator } from './ThinkingIndicator';
+import { effortLabels } from '../chat';
+import { attachmentHint } from '../attachments';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -408,11 +410,23 @@ function TurnStep({
           <div>
             <div className="entry-label">Вы</div>
             <div className="prose">{turn.prompt}</div>
+            {turn.attachments.length > 0 && (
+              <div className="sent-attachments">
+                {turn.attachments.map((file) => (
+                  <span key={file.path} title={`${attachmentHint(file)}\n${file.path}`}>
+                    {file.name}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
       {open && filter !== 'agent' && turn.activities.length > 0 && (
-        <details className="chat-activity-details" open={filter === 'tools' ? true : undefined}>
+        <details
+          className="chat-activity-details"
+          open={filter === 'tools' || (live && turn.status === 'running') ? true : undefined}
+        >
           <summary>
             {team ? 'Работа команды' : 'Действия агента'} · {turn.activities.length}
           </summary>
@@ -430,6 +444,35 @@ function TurnStep({
               </li>
             ))}
           </ul>
+        </details>
+      )}
+      {open && filter !== 'tools' && (turn.progress.trim() || turn.teamMessages.length > 0) && (
+        <details className="progress-details" open>
+          <summary>
+            <Sparkles size={14} /> {team ? 'Обсуждение команды' : 'Ход работы'}
+          </summary>
+          {turn.progress.trim() && (
+            <div className="progress-copy">
+              <ChatMarkdown text={turn.progress} streaming={live && turn.status === 'running'} />
+            </div>
+          )}
+          {turn.teamMessages.map((message) => (
+            <div
+              className="team-transcript-message"
+              key={`${message.sessionId}:${message.stageId}`}
+            >
+              <strong>{message.title}</strong>
+              {message.model && (
+                <small>
+                  {message.model} · Обдумывание:{' '}
+                  {message.reasoningEffort
+                    ? `${effortLabels[message.reasoningEffort] ?? message.reasoningEffort} (запрошено)`
+                    : 'настройка CLI'}
+                </small>
+              )}
+              <ChatMarkdown text={message.text} streaming={live && turn.status === 'running'} />
+            </div>
+          ))}
         </details>
       )}
       {filter !== 'agent' &&
@@ -462,7 +505,14 @@ function TurnStep({
           <div>
             <div className="entry-label">
               {team ? 'Ответ команды' : providerName}{' '}
-              {!team && !demo && <span className="muted">· {model}</span>}
+              {!demo && (
+                <span className="muted">
+                  · {model} ·{' '}
+                  {turn.reasoningEffort
+                    ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)`
+                    : 'Уровень по умолчанию CLI'}
+                </span>
+              )}
             </div>
             <div className="prose">
               {turn.text ? (

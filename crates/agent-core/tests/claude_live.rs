@@ -38,10 +38,22 @@ async fn isolated_signed_out_profile_and_documented_catalog() {
         Some("https://claude.ai/settings/usage")
     );
     let models = core.account_models(&account.id).await.expect("aliases");
-    assert_eq!(
-        models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        ["sonnet", "opus", "haiku"]
-    );
+    assert!([
+        "sonnet",
+        "opus",
+        "haiku",
+        "claude-opus-5-5",
+        "claude-opus-4-8"
+    ]
+    .iter()
+    .all(|id| models.iter().any(|model| model.id == *id)));
+    assert!(!models
+        .iter()
+        .find(|model| model.id == "claude-opus-4-6")
+        .unwrap()
+        .reasoning_efforts
+        .iter()
+        .any(|effort| effort == "xhigh"));
     let extensions = core
         .account_extensions(&account.id)
         .await

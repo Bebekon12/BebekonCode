@@ -20,6 +20,8 @@ struct Probe {
     reported_failure: AtomicBool,
     active: AtomicUsize,
     peak: AtomicUsize,
+    writing: AtomicUsize,
+    peak_writing: AtomicUsize,
 }
 struct Engine {
     id: &'static str,
@@ -65,8 +67,16 @@ impl AgentProvider for Engine {
         }
         let active = self.probe.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.probe.peak.fetch_max(active, Ordering::SeqCst);
+        let writing = request.session.permission_profile != "read_only";
+        if writing {
+            let count = self.probe.writing.fetch_add(1, Ordering::SeqCst) + 1;
+            self.probe.peak_writing.fetch_max(count, Ordering::SeqCst);
+        }
         tokio::select! { _=cancel.cancelled()=>{}, _=tokio::time::sleep(std::time::Duration::from_millis(80))=>{} }
         self.probe.active.fetch_sub(1, Ordering::SeqCst);
+        if writing {
+            self.probe.writing.fetch_sub(1, Ordering::SeqCst);
+        }
         if cancel.is_cancelled() {
             return Ok(());
         }
@@ -383,6 +393,19 @@ async fn team_exchanges_results_and_cancellation_stops_all_workers() {
         assert!(requests
             .iter()
             .all(|r| r.prompt.contains("мультиагентном чате BebekonCode")));
+        assert_eq!(
+            probe.peak_writing.load(Ordering::SeqCst),
+            1,
+            "writers must not overlap"
+        );
+        assert!(requests
+            .iter()
+            .filter(|r| r.prompt.contains("Обсудите результаты коллег"))
+            .all(|r| r.session.permission_profile == "read_only"));
+        assert_eq!(
+            requests.first().unwrap().session.permission_profile,
+            "standard"
+        );
         assert!(requests.iter().all(|r| r
             .prompt
             .contains("прямого канала или инструмента вызова коллег у тебя нет")));

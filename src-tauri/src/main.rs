@@ -13,6 +13,20 @@ struct AppState {
 type IpcResult<T> = Result<T, String>;
 
 #[tauri::command]
+async fn plugin_catalog() -> IpcResult<agent_core::catalog::Catalog> {
+    agent_core::catalog::fetch()
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn open_catalog_source(provider: String, app: tauri::AppHandle) -> IpcResult<()> {
+    let url = agent_core::catalog::source_url(&provider).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn review_document(
     workspace_id: String,
     path: String,
@@ -253,11 +267,12 @@ async fn handoff_session(
 async fn send_message(
     session_id: String,
     prompt: String,
+    attachments: Option<Vec<agent_core::attachments::Attachment>>,
     state: State<'_, AppState>,
 ) -> IpcResult<String> {
     state
         .core
-        .send_message(&session_id, prompt)
+        .send_message_with_attachments(&session_id, prompt, attachments.unwrap_or_default())
         .await
         .map_err(|error| error.to_string())
 }
@@ -598,6 +613,8 @@ fn main() {
             account_extensions,
             resolve_approval,
             open_usage,
+            plugin_catalog,
+            open_catalog_source,
             save_settings,
             git_status,
             git_diff,

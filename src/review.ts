@@ -116,6 +116,36 @@ export function parseReview(input: ReviewDocument): ParsedReview {
         result.sheets.push({ id: `table:${i}`, name: `Таблица ${result.sheets.length + 1}`, rows });
       }
     }
+  } else if (input.kind === 'pptx') {
+    const presentation = part('ppt/presentation.xml');
+    const relationships = elements(part('ppt/_rels/presentation.xml.rels'), 'Relationship');
+    for (const [index, slide] of elements(presentation, 'sldId').slice(0, 64).entries()) {
+      const rid = Array.from(slide.attributes).find(
+        (a) => a.localName === 'id' && a.namespaceURI?.includes('relationships'),
+      )?.value;
+      const rel = relationships.find((r) => r.getAttribute('Id') === rid);
+      const target = rel?.getAttribute('Target') ?? '';
+      if (
+        rel?.getAttribute('TargetMode') === 'External' ||
+        !/^(?:\/ppt\/|(?:\.\/)?)(?:slides\/slide\d+\.xml)$/.test(target)
+      )
+        throw new Error('Внешние или нестандартные ссылки на слайды недоступны');
+      const name = target.startsWith('/ppt/')
+        ? target.slice(1)
+        : `ppt/${target.replace(/^\.\//, '')}`;
+      result.blocks.push({ id: `slide:${index}`, heading: true, text: `Слайд ${index + 1}` });
+      const paragraphs = elements(part(name), 'p');
+      if (paragraphs.length > 200) result.truncated = true;
+      for (const [paragraphIndex, paragraph] of paragraphs.slice(0, 200).entries()) {
+        result.blocks.push({
+          id: `slide:${index}:p:${paragraphIndex}`,
+          text: elements(paragraph, 't')
+            .map((node) => node.textContent ?? '')
+            .join(''),
+        });
+      }
+    }
+    result.truncated ||= elements(presentation, 'sldId').length > 64;
   } else if (input.kind === 'xlsx') {
     const workbook = part('xl/workbook.xml');
     const rels = part('xl/_rels/workbook.xml.rels');

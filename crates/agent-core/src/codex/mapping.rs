@@ -82,6 +82,16 @@ pub fn map_notification(method: &str, params: &Value, state: &mut TurnState) -> 
         return vec![];
     }
     match method {
+        "item/reasoning/summaryTextDelta" => str_at(params, "delta")
+            .map(|text| {
+                vec![Mapped::Event(EventPayload::ProgressDelta {
+                    text: text.into(),
+                })]
+            })
+            .unwrap_or_default(),
+        "item/reasoning/summaryPartAdded" => vec![Mapped::Event(EventPayload::ProgressDelta {
+            text: "\n\n".into(),
+        })],
         "item/agentMessage/delta" => {
             let (Some(item), Some(delta)) = (str_at(params, "itemId"), str_at(params, "delta"))
             else {

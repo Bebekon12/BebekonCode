@@ -193,15 +193,19 @@ export function AgentPicker({
           <select
             aria-label="Доступ"
             value={value.permission_profile}
-            disabled={worker}
             onChange={(e) => change({ ...value, permission_profile: e.target.value })}
           >
             <option value="standard">Чтение и изменения проекта · с подтверждениями</option>
+            <option value="workspace_auto">Автоправки внутри проекта</option>
             <option value="read_only">Только чтение</option>
           </select>
-          {worker && (
-            <small className="muted">Параллельный анализ: запись выполняет основной агент.</small>
-          )}
+          <small className="muted">
+            {value.permission_profile === 'workspace_auto'
+              ? 'Правки файлов проекта без повторных вопросов. Запросы дополнительных разрешений остаются видимыми.'
+              : worker
+                ? 'Участники с правом записи работают по очереди, чтобы не перезаписывать изменения друг друга.'
+                : 'Доступ ограничен выбранным проектом.'}
+          </small>
         </label>
         <label className="field">
           Роль

@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct TurnRequest {
+    pub attachments: Vec<crate::attachments::AttachedFile>,
     pub prompt: String,
     pub session: Session,
     /// The account bound to the session at creation. Providers must never substitute another.
