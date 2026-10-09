@@ -111,10 +111,48 @@ try {
       'high',
       'max',
     ]);
-    assert(result.extensions.errors.length > 0);
+    assert.deepEqual(result.extensions.errors, []);
     assert.deepEqual(result.extensions.plugins, []);
+    assert.deepEqual(result.extensions.mcp_servers, []);
+    assert.deepEqual(result.extensions.skills, []);
     console.log(
-      'PASS: native Claude detection, isolated signed-out profile, official aliases and unavailable extensions',
+      'PASS: native Claude detection, isolated signed-out profile, official aliases and empty profile inventory',
+    );
+  }
+  if (process.argv.includes('--plugins')) {
+    const result = await page.evaluate(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const account = await invoke('add_account', {
+        provider: 'openai',
+        label: 'Проверка плагинов',
+      });
+      try {
+        const inventory = await invoke('account_plugins', { accountId: account.id });
+        let rejectedSource = false;
+        let rejectedId = false;
+        try {
+          await invoke('add_account_plugin_source', { accountId: account.id, source: 'unknown' });
+        } catch {
+          rejectedSource = true;
+        }
+        try {
+          await invoke('change_account_plugin', {
+            accountId: account.id,
+            pluginId: '--invalid',
+            install: true,
+          });
+        } catch {
+          rejectedId = true;
+        }
+        return { inventory, rejectedSource, rejectedId };
+      } finally {
+        await invoke('remove_account', { accountId: account.id });
+      }
+    });
+    assert.deepEqual(result.inventory.entries, []);
+    assert(result.rejectedSource && result.rejectedId);
+    console.log(
+      'PASS: native plugin IPC reads the isolated CLI profile and rejects invalid mutations',
     );
   }
   assert((await fs.stat(path.join(fixture, 'webview-profile'))).isDirectory());
@@ -459,7 +497,10 @@ try {
   const userBox = await page.locator('.step-message:not(.agent)').boundingBox();
   const answerBox = await page.locator('.step-message.agent').boundingBox();
   assert(userBox.x > answerBox.x + 80, 'User bubble is not aligned to the right');
-  assert(answerBox.width > 900, 'Packaged chat remained narrow');
+  assert(
+    answerBox.width > 700 && answerBox.width < 900,
+    'Packaged chat reading column is incorrect',
+  );
   await page.screenshot({ path: 'test-results/native-workspace-team.png' });
   const timelineBefore = await page.locator('.chat-timeline').boundingBox();
   await page.locator('.team-panel > summary').click();
