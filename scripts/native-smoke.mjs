@@ -263,7 +263,7 @@ try {
   await page.getByRole('button', { name: 'Изменения', exact: true }).click();
   const changes = page.getByRole('dialog', { name: 'Изменения проекта' });
   await changes.getByText('hello.txt', { exact: true }).waitFor();
-  await expect(changes.locator('.changes-diff')).toContainText('External writer');
+  await expect(changes.getByLabel('Изменения файла')).toContainText('External writer');
   await changes.getByRole('button', { name: 'Закрыть окно', exact: true }).click();
   await page.evaluate(
     (workspaceId) =>
