@@ -10,6 +10,48 @@ export interface AccountState {
   markSigningIn: (accountId: string, value: boolean) => void;
 }
 
+/** An auth/sandbox refresh without quota data must not erase a newer provider event. */
+export function mergeStatusSnapshot(
+  previous: AccountStatus | undefined,
+  next: AccountStatus,
+): AccountStatus {
+  if (
+    !previous ||
+    previous.account_id !== next.account_id ||
+    previous.state !== 'signed_in' ||
+    next.state !== 'signed_in'
+  )
+    return next;
+  if (!previous.usage.length || (next.usage.length && next.checked_at >= previous.checked_at))
+    return next;
+  return {
+    ...next,
+    usage: previous.usage,
+    checked_at: previous.checked_at,
+    credits: previous.credits,
+    limit_reached: previous.limit_reached,
+    usage_detail: previous.usage_detail ?? next.usage_detail,
+  };
+}
+
+export function mergeUsageUpdate(
+  previous: AccountStatus | undefined,
+  update: AccountStatus,
+): AccountStatus {
+  if (!previous) return update;
+  if (previous.account_id !== update.account_id || previous.state !== 'signed_in') return previous;
+  const fresh = update.usage.length > 0 && update.checked_at >= previous.checked_at;
+  return {
+    ...previous,
+    usage: fresh ? update.usage : previous.usage,
+    plan: previous.plan ?? update.plan,
+    credits: update.credits ?? previous.credits,
+    limit_reached: fresh ? update.limit_reached : previous.limit_reached,
+    checked_at: fresh ? update.checked_at : previous.checked_at,
+    usage_detail: update.usage_detail ?? previous.usage_detail,
+  };
+}
+
 /**
  * Live account status (sign-in, plan, usage) for accounts that need sign-in. Loaded once per
  * account and then updated from provider notifications; there is no periodic polling.
@@ -34,7 +76,10 @@ export function useAccountState(
       try {
         const status = await client.accountStatus(accountId);
         refreshFailed.current.delete(accountId);
-        setStatuses((current) => ({ ...current, [accountId]: status }));
+        setStatuses((current) => ({
+          ...current,
+          [accountId]: mergeStatusSnapshot(current[accountId], status),
+        }));
         setErrors(({ [accountId]: _removed, ...rest }) => rest);
       } catch (error) {
         refreshFailed.current.add(accountId);
@@ -70,22 +115,10 @@ export function useAccountState(
         if (event.kind === 'usage' && event.status) {
           const update = event.status;
           const fresh = update.usage.length > 0;
-          setStatuses((current) => {
-            const previous = current[event.account_id];
-            if (!previous) return current;
-            return {
-              ...current,
-              [event.account_id]: {
-                ...previous,
-                usage: fresh ? update.usage : previous.usage,
-                plan: previous.plan ?? update.plan,
-                limit_reached: update.limit_reached,
-                // An empty update must not make old percentages look freshly checked.
-                checked_at: fresh ? update.checked_at : previous.checked_at,
-                usage_detail: update.usage_detail ?? previous.usage_detail,
-              },
-            };
-          });
+          setStatuses((current) => ({
+            ...current,
+            [event.account_id]: mergeUsageUpdate(current[event.account_id], update),
+          }));
           if (fresh && refreshFailed.current.delete(event.account_id))
             setErrors(({ [event.account_id]: _removed, ...rest }) => rest);
           return;

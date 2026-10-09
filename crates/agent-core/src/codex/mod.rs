@@ -723,7 +723,7 @@ impl AgentProvider for CodexProvider {
         status.state = "signed_in".into();
         status.plan_usage_enabled = Some(credentials.plan_enabled());
         status.message = Some(if credentials.plan_enabled() {
-            "Используется план ChatGPT. Расход и лимиты — в настройках ChatGPT.".into()
+            "Sign in with ChatGPT не предоставляет документированный API процентов лимита. Посмотрите свои лимиты в ChatGPT → Настройки → Использование.".into()
         } else {
             "Вход выполнен, но использование плана ChatGPT не разрешено.".into()
         });
@@ -731,10 +731,6 @@ impl AgentProvider for CodexProvider {
             match self.server(account).await {
                 Ok(server) => {
                     status.sandbox = Some(sandbox::readiness(&server).await);
-                    match server.peer.request("account/rateLimits/read", json!({}), REQUEST_TIMEOUT).await {
-                    Ok(value) => apply_rate_limits(&value, &mut status),
-                    Err(_) => status.message = Some("Вход выполнен. CLI не предоставил снимок лимитов; попробуйте обновить позже.".into()),
-                    }
                 }
                 Err(_) => {
                     status.message =

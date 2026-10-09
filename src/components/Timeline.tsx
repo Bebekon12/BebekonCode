@@ -1,6 +1,7 @@
 import { ChatMarkdown } from './ChatMarkdown';
 import { RunChanges, type ChangeSource } from './RunChanges';
 import { ThinkingIndicator } from './ThinkingIndicator';
+import { ImagePreview } from './ImagePreview';
 import { effortLabels } from '../chat';
 import { attachmentHint } from '../attachments';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -27,7 +28,7 @@ import {
 import { buildTimeline, filterTimeline, type TimelineFilter, type TimelineTurn } from '../timeline';
 import type { AgentEvent, ApprovalDecision, Session, SessionStatus } from '../contracts';
 import type { TimelineApproval } from '../timeline';
-import { clock, demoActivity, demoResponse, duration } from '../locale';
+import { clock, demoActivity, demoResponse, duration, errorText } from '../locale';
 
 type StepState = SessionStatus | 'ready';
 const stepIcons: Record<StepState, typeof Check> = {
@@ -67,6 +68,7 @@ export function Timeline({
   chooseAnotherAccount,
   manageUsage,
   changes,
+  loadImage,
 }: {
   events: AgentEvent[];
   session: Session;
@@ -82,6 +84,7 @@ export function Timeline({
   manageUsage?: () => void;
   /** Project change summary under the latest finished answer; absent without a Git project. */
   changes?: ChangeSource;
+  loadImage?: (path: string) => Promise<string>;
 }) {
   const demo = session.provider === 'mock';
   const team =
@@ -105,6 +108,19 @@ export function Timeline({
     [events, demo],
   );
   const [filter, setFilter] = useState<TimelineFilter>('all');
+  const [image, setImage] = useState<{ name: string; src?: string; error?: string }>();
+  const imageRequest = useRef(0);
+  const viewImage = async (file: { name: string; path: string }) => {
+    const request = ++imageRequest.current;
+    setImage({ name: file.name });
+    try {
+      if (!loadImage) throw new Error('Просмотр вложения сейчас недоступен.');
+      const src = await loadImage(file.path);
+      if (request === imageRequest.current) setImage({ name: file.name, src });
+    } catch (error) {
+      if (request === imageRequest.current) setImage({ name: file.name, error: errorText(error) });
+    }
+  };
   const [showDetails, setShowDetails] = useState(false);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -132,6 +148,8 @@ export function Timeline({
     firstSequence.current = undefined;
     setCollapsed(new Set());
     setActiveTurn('');
+    imageRequest.current++;
+    setImage(undefined);
   }, [session.id]);
   const questions = turns.filter((turn) => turn.prompt.trim());
   // Marks the question whose step is at the top of the viewport.
@@ -295,6 +313,7 @@ export function Timeline({
               manageUsage={manageUsage}
               last={turn.id === turns[turns.length - 1]?.id}
               changes={running ? undefined : changes}
+              viewImage={(file) => void viewImage(file)}
             />
           ))}
           {overview && (running || interrupted) && (
@@ -360,6 +379,15 @@ export function Timeline({
             </button>
           ))}
         </nav>
+      )}
+      {image && (
+        <ImagePreview
+          {...image}
+          close={() => {
+            imageRequest.current++;
+            setImage(undefined);
+          }}
+        />
       )}
     </>
   );
@@ -436,6 +464,7 @@ function TurnStep({
   manageUsage,
   last,
   changes,
+  viewImage,
 }: {
   turn: TimelineTurn;
   filter: TimelineFilter;
@@ -453,6 +482,7 @@ function TurnStep({
   manageUsage?: () => void;
   last: boolean;
   changes?: ChangeSource;
+  viewImage: (file: { name: string; path: string }) => void;
 }) {
   const state: StepState = turn.status === 'running' && interrupted ? 'interrupted' : turn.status;
   const elapsed = turn.finishedAt ? ` · ${duration(turn.finishedAt - turn.startedAt)}` : '';
@@ -475,7 +505,7 @@ function TurnStep({
       toggle={toggle}
       anchor={turn.id}
     >
-      {filter === 'all' && turn.prompt && (
+      {filter === 'all' && (turn.prompt || turn.attachments.length > 0) && (
         <div className="step-message">
           <span className="step-message-avatar">
             <UserRound size={13} />
@@ -485,11 +515,23 @@ function TurnStep({
             <div className="prose">{turn.prompt}</div>
             {turn.attachments.length > 0 && (
               <div className="sent-attachments">
-                {turn.attachments.map((file) => (
-                  <span key={file.path} title={`${attachmentHint(file)}\n${file.path}`}>
-                    {file.name}
-                  </span>
-                ))}
+                {turn.attachments.map((file) =>
+                  file.mime.startsWith('image/') ? (
+                    <button
+                      className="sent-image-button"
+                      key={file.path}
+                      onClick={() => viewImage(file)}
+                      aria-label={`Посмотреть ${file.name}`}
+                      title="Посмотреть изображение"
+                    >
+                      {file.name}
+                    </button>
+                  ) : (
+                    <span key={file.path} title={`${attachmentHint(file)}\n${file.path}`}>
+                      {file.name}
+                    </span>
+                  ),
+                )}
               </div>
             )}
           </div>

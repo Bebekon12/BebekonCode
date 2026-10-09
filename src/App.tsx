@@ -598,6 +598,9 @@ export function App() {
                   />
                 )}
                 <Timeline
+                  loadImage={
+                    client ? (path) => client.attachmentImage(session.id, path) : undefined
+                  }
                   session={session}
                   providerName={providerName(session.provider)}
                   openFiles={() => setDialog('files')}
@@ -865,6 +868,35 @@ export function App() {
           client={client}
           data={data}
           session={session}
+          prepareInstall={async (accountId, skill) => {
+            const models = await client.accountModels(accountId);
+            const model = models.find((m) => m.is_default) ?? models[0];
+            if (!model) throw new Error('Codex не предоставил доступную модель. Обновите аккаунт.');
+            const created = await client.createChat({
+              workspace_id: session?.workspace_id ?? null,
+              mode: 'single',
+              agents: [
+                {
+                  provider: 'openai',
+                  account_profile_id: accountId,
+                  model: model.id,
+                  reasoning_effort: null,
+                  permission_profile: 'standard',
+                  tools: {},
+                  role: '',
+                },
+              ],
+            });
+            setData(await client.snapshot());
+            selectSession(created);
+            setDrafts((current) => ({
+              ...current,
+              [created.id]: skill
+                ? `$skill-installer Установи навык ${skill} из официального каталога openai/skills для текущего изолированного профиля Codex. Сохрани песочницу и подтверждения. Не обращайся к учётным данным. Сообщи результат установки и путь навыка.`
+                : '$skill-installer Покажи доступные для установки навыки из официального каталога openai/skills. Пока ничего не устанавливай.',
+            }));
+            setDialog(null);
+          }}
           close={() => setDialog(null)}
           configure={(member) => {
             setDialog(null);

@@ -23,6 +23,47 @@ pub struct AttachedFile {
     pub mime: String,
 }
 
+/// Resolves a recorded attachment inside its chat, then checks its size and raster signature.
+pub fn image_data_url(session: &Session, file: &AttachedFile) -> Result<String> {
+    use std::io::Read;
+    if !file.mime.starts_with("image/") {
+        return Err(invalid("Это вложение не является изображением"));
+    }
+    let root = Path::new(&session.working_directory).canonicalize()?;
+    // Recorded provider paths omit Windows' verbatim prefix, just as `prepare` does.
+    #[cfg(windows)]
+    let recorded_root =
+        std::path::PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\"));
+    #[cfg(not(windows))]
+    let recorded_root = root.clone();
+    let path = Path::new(&file.path);
+    let relative = path
+        .strip_prefix(&recorded_root)
+        .map_err(|_| invalid("Изображение находится вне папки чата"))?;
+    let mut parts = relative.components();
+    if parts.next()
+        != Some(std::path::Component::Normal(
+            ".bebekon-attachments".as_ref(),
+        ))
+        || !matches!(parts.next(), Some(std::path::Component::Normal(_)))
+        || parts.next().is_some()
+    {
+        return Err(invalid("Недопустимый путь изображения"));
+    }
+    let resolved = files::resolve(&root, &relative.to_string_lossy().replace('\\', "/"), false)?;
+    let mut bytes = Vec::new();
+    fs::File::open(resolved)?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    let data = STANDARD.encode(bytes);
+    validate(&Attachment {
+        name: file.name.clone(),
+        mime: file.mime.clone(),
+        data: data.clone(),
+    })?;
+    Ok(format!("data:{};base64,{data}", file.mime))
+}
+
 fn invalid(message: &str) -> CoreError {
     CoreError::Invalid(message.into())
 }

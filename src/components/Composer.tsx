@@ -1,5 +1,6 @@
 import { forwardRef, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ArrowUpRight, Square, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
+import { ImagePreview } from './ImagePreview';
 import {
   attachmentHint,
   attachmentSize,
@@ -40,6 +41,7 @@ export const Composer = forwardRef<
   ref,
 ) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const [image, setImage] = useState<DraftAttachment>();
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -60,6 +62,13 @@ export const Composer = forwardRef<
   };
   return (
     <div className="composer-region">
+      {image && (
+        <ImagePreview
+          name={image.name}
+          src={`data:${image.mime};base64,${image.data}`}
+          close={() => setImage(undefined)}
+        />
+      )}
       <div
         className={`composer ${running ? 'composer-running' : ''} ${dragging ? 'composer-dragging' : ''}`}
         onDragOver={(event) => {
@@ -97,7 +106,14 @@ export const Composer = forwardRef<
             {attachments.map((file) => (
               <div className="attachment-card" key={file.id}>
                 {file.mime.startsWith('image/') ? (
-                  <img src={`data:${file.mime};base64,${file.data}`} alt={file.name} />
+                  <button
+                    type="button"
+                    className="attachment-image-button"
+                    aria-label={`Посмотреть ${file.name}`}
+                    onClick={() => setImage(file)}
+                  >
+                    <img src={`data:${file.mime};base64,${file.data}`} alt={file.name} />
+                  </button>
                 ) : (
                   <FileText size={22} />
                 )}

@@ -217,6 +217,7 @@ export interface UpdateProgress {
   total: number | null;
 }
 export interface ClientTransport {
+  attachmentImage(sessionId: string, path: string): Promise<string>;
   reviewDocument(workspaceId: string, path: string): Promise<ReviewDocument>;
   reviewComments(workspaceId: string, path: string): Promise<ReviewComment[]>;
   addReviewComment(workspaceId: string, path: string, input: NewComment): Promise<ReviewComment>;

@@ -28,6 +28,70 @@ async fn fixture() -> (test_support::TestDirectory, std::sync::Arc<Core>, String
 }
 
 #[tokio::test]
+async fn image_preview_only_reads_recorded_raster_attachments_in_the_requested_chat() {
+    use agent_core::attachments::{prepare, Attachment};
+    let (temp, core, id) = fixture().await;
+    let session = core.storage.session(&id).await.unwrap();
+    let image = Attachment {
+        name: "image.png".into(),
+        mime: "image/png".into(),
+        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=".into(),
+    };
+    let files = prepare(&session, vec![image.clone()]).unwrap();
+    let path = &files[0].path;
+    assert!(core.attachment_image(&id, path).await.is_err());
+    core.storage
+        .append(
+            &id,
+            "preview",
+            EventPayload::UserAttachments {
+                files: files.clone(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        core.attachment_image(&id, path).await.unwrap(),
+        format!("data:image/png;base64,{}", image.data)
+    );
+    let second = core
+        .create_session(CreateSession {
+            workspace_id: session.workspace_id.clone(),
+            provider: "mock".into(),
+            account_profile_id: "mock-local".into(),
+            model: "mock-stream-v1".into(),
+            permission_profile: "standard".into(),
+        })
+        .await
+        .unwrap();
+    assert!(core.attachment_image(&second.id, path).await.is_err());
+    let outside = temp.path().join("outside.png");
+    std::fs::write(&outside, b"\x89PNG\r\n\x1a\n").unwrap();
+    let mut forged = files[0].clone();
+    forged.path = outside.to_string_lossy().into_owned();
+    core.storage
+        .append(
+            &id,
+            "preview",
+            EventPayload::UserAttachments {
+                files: vec![forged],
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(core
+        .attachment_image(&id, &outside.to_string_lossy())
+        .await
+        .is_err());
+    std::fs::write(path, b"changed to non-image").unwrap();
+    assert!(core.attachment_image(&id, path).await.is_err());
+    std::fs::write(path, vec![0; 4 * 1024 * 1024 + 1]).unwrap();
+    assert!(core.attachment_image(&id, path).await.is_err());
+}
+
+#[tokio::test]
 async fn parallel_sessions_cancel_independently_and_persist() {
     let (_temp, core, id) = fixture().await;
     let snapshot = core.snapshot().await.expect("snapshot");

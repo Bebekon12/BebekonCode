@@ -13,6 +13,19 @@ struct AppState {
 type IpcResult<T> = Result<T, String>;
 
 #[tauri::command]
+async fn attachment_image(
+    session_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> IpcResult<String> {
+    state
+        .core
+        .attachment_image(&session_id, &path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn plugin_catalog() -> IpcResult<agent_core::catalog::Catalog> {
     agent_core::catalog::fetch()
         .await
@@ -630,6 +643,7 @@ fn main() {
             account_logout,
             account_models,
             account_extensions,
+            attachment_image,
             resolve_approval,
             open_usage,
             plugin_catalog,

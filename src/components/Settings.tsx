@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck, SlidersHorizontal, Cpu, Puzzle, Info } from 'lucide-react';
+import {
+  RefreshCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Cpu,
+  Puzzle,
+  Info,
+  Activity,
+  Search,
+  ArrowUpRight,
+} from 'lucide-react';
 import { Dialog } from './Dialog';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -16,6 +26,45 @@ import { UpdatePanel } from './UpdatePanel';
 import product from '../../product.json';
 import pkg from '../../package.json';
 import { errorText } from '../locale';
+import { planLabel, resetLabel, windowLabel } from '../usage';
+const categories = [
+  {
+    id: 'Основные',
+    label: 'Основные',
+    icon: SlidersHorizontal,
+    description: 'Оформление, чтение и поведение приложения.',
+  },
+  {
+    id: 'Провайдеры',
+    label: 'Аккаунты и провайдеры',
+    icon: Cpu,
+    description: 'Подключайте CLI и управляйте отдельными аккаунтами.',
+  },
+  {
+    id: 'Лимиты',
+    label: 'Лимиты и использование',
+    icon: Activity,
+    description: 'Доступный остаток подписок и переход к лимитам провайдера.',
+  },
+  {
+    id: 'Разрешения',
+    label: 'Доступ и безопасность',
+    icon: ShieldCheck,
+    description: 'Как работают песочница, подтверждения и доступ к проекту.',
+  },
+  {
+    id: 'Возможности',
+    label: 'Возможности',
+    icon: Puzzle,
+    description: 'Командная работа, инструменты и доступные расширения.',
+  },
+  {
+    id: 'О программе и обновления',
+    label: 'О программе',
+    icon: Info,
+    description: 'Версия приложения и проверенные обновления для Windows.',
+  },
+];
 export function Settings({
   client,
   appearance,
@@ -54,6 +103,7 @@ export function Settings({
   close: () => void;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'Основные');
+  const [search, setSearch] = useState('');
   const [providerId, setProviderId] = useState(
     accounts.find((a) => a.provider !== 'mock')?.provider ?? 'openai',
   );
@@ -99,42 +149,64 @@ export function Settings({
       wide
       closeDisabled={installing}
     >
-      <div className="settings-layout">
+      <div className="settings-layout settings-redesign">
         <nav aria-label="Разделы настроек">
-          {['Основные', 'Провайдеры', 'Разрешения', 'Возможности', 'О программе и обновления'].map(
-            (category) => (
+          <label className="settings-search">
+            <Search size={15} />
+            <input
+              aria-label="Найти раздел настроек"
+              placeholder="Найти раздел…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+          {categories
+            .filter((category) =>
+              `${category.id} ${category.label} ${category.description}`
+                .toLowerCase()
+                .includes(search.toLowerCase()),
+            )
+            .map((category) => (
               <button
-                key={category}
-                aria-label={category}
-                className={tab === category ? 'selected' : ''}
+                key={category.id}
+                aria-label={category.id}
+                aria-current={tab === category.id ? 'page' : undefined}
+                className={tab === category.id ? 'selected' : ''}
                 disabled={installing}
-                onClick={() => setTab(category)}
+                onClick={() => setTab(category.id)}
               >
-                {category === 'Основные' ? (
-                  <SlidersHorizontal size={17} />
-                ) : category === 'Провайдеры' ? (
-                  <Cpu size={17} />
-                ) : category === 'Разрешения' ? (
-                  <ShieldCheck size={17} />
-                ) : category === 'Возможности' ? (
-                  <Puzzle size={17} />
-                ) : (
-                  <Info size={17} />
-                )}
-                <span>{category === 'О программе и обновления' ? 'О программе' : category}</span>
+                <category.icon size={18} />
+                <span>{category.label}</span>
               </button>
-            ),
-          )}
+            ))}
+          {search &&
+            !categories.some((category) =>
+              `${category.id} ${category.label} ${category.description}`
+                .toLowerCase()
+                .includes(search.toLowerCase()),
+            ) && <p className="small muted">Раздел не найден.</p>}
+          <div className="settings-local-note">
+            <ShieldCheck size={16} />
+            <span>
+              Локальная история
+              <br />
+              <small>На этом компьютере</small>
+            </span>
+          </div>
         </nav>
         <div className="settings-content">
+          <header className="settings-section-heading">
+            <span className="settings-eyebrow">BebekonCode · настройки</span>
+            <h3>{categories.find((category) => category.id === tab)?.label}</h3>
+            <p>{categories.find((category) => category.id === tab)?.description}</p>
+          </header>
           {tab === 'Основные' && (
             <>
-              <h3>Ваша локальная рабочая область</h3>
-              <p className="muted">Проекты и история сессий хранятся на этом компьютере.</p>
+              <h4 className="settings-group-title">Внешний вид</h4>
               <div className="setting-row">
                 <div>
                   <strong>Оформление</strong>
-                  <p>Спокойные цвета и локальный шрифт Inter.</p>
+                  <p>Выберите удобную тему для работы.</p>
                 </div>
                 <select
                   aria-label="Тема оформления"
@@ -163,6 +235,7 @@ export function Settings({
                   <option value="large">Крупный</option>
                 </select>
               </div>
+              <h4 className="settings-group-title">Обновления и хранение</h4>
               <div className="setting-row">
                 <div>
                   <strong>Проверять обновления при запуске</strong>
@@ -186,17 +259,134 @@ export function Settings({
               </div>
               <div className="setting-row">
                 <div>
-                  <strong>Удалённый доступ и телеметрия</strong>
-                  <p>В этой версии недоступны. Сетевого сервера и аналитики нет.</p>
+                  <strong>Проекты и история</strong>
+                  <p>Хранятся на этом компьютере. Телеметрия и удалённый сервер отключены.</p>
                 </div>
                 <ShieldCheck size={19} />
               </div>
             </>
           )}
+          {tab === 'Лимиты' && (
+            <>
+              <div className="row-between settings-limit-toolbar">
+                <span className="small muted">Обновление по запросу и событиям CLI</span>
+                <button
+                  className="secondary-button"
+                  disabled={busy || !accounts.some((a) => a.provider !== 'mock')}
+                  onClick={() =>
+                    void run(async () => {
+                      await Promise.allSettled(
+                        accounts
+                          .filter((a) => a.provider !== 'mock')
+                          .map((a) => accountState.refresh(a.id)),
+                      );
+                    })
+                  }
+                >
+                  <RefreshCw size={14} className={busy ? 'spin' : ''} /> Обновить лимиты
+                </button>
+              </div>
+              <div className="settings-limit-grid">
+                {accounts
+                  .filter((a) => a.provider !== 'mock')
+                  .map((account) => {
+                    const status = accountState.statuses[account.id];
+                    return (
+                      <article className="settings-limit-card" key={account.id}>
+                        <div className="row-between">
+                          <strong>{account.label}</strong>
+                          <span className="badge">
+                            {status?.plan
+                              ? planLabel(status.plan)
+                              : account.provider === 'openai'
+                                ? 'ChatGPT'
+                                : 'Claude'}
+                          </span>
+                        </div>
+                        {status?.state === 'signed_in' ? (
+                          <>
+                            {status.usage.map((window, index) => (
+                              <div className="settings-usage-window" key={index}>
+                                <div className="row-between">
+                                  <span>{windowLabel(window.window_minutes)}</span>
+                                  <strong>
+                                    {Math.round(Math.max(0, 100 - window.used_percent))}% осталось
+                                  </strong>
+                                </div>
+                                <progress
+                                  max={100}
+                                  value={Math.max(0, 100 - window.used_percent)}
+                                  aria-label={`${account.label}: ${windowLabel(window.window_minutes)}, осталось`}
+                                />
+                                <small className="muted">{resetLabel(window.resets_at)}</small>
+                              </div>
+                            ))}
+                            {!status.usage.length && (
+                              <p className="muted">
+                                {account.provider === 'openai'
+                                  ? 'Для входа через Sign in with ChatGPT API процентов лимита не документирован. Ваши лимиты доступны в настройках ChatGPT.'
+                                  : 'Claude CLI не передал проценты лимитов. Проверьте остаток на странице использования Claude.'}
+                              </p>
+                            )}
+                            {status.limit_reached && (
+                              <p className="notice error">
+                                Провайдер сообщил об исчерпании лимита.
+                              </p>
+                            )}
+                            {status.credits && <p className="small">Кредиты: {status.credits}</p>}
+                            {status.usage_detail && (
+                              <details>
+                                <summary>Статус CLI</summary>
+                                <pre className="settings-cli-status">{status.usage_detail}</pre>
+                              </details>
+                            )}
+                          </>
+                        ) : (
+                          <p className="muted">
+                            {!status
+                              ? 'Проверка аккаунта…'
+                              : status.state === 'signed_out'
+                                ? 'Войдите в аккаунт в разделе «Аккаунты и провайдеры».'
+                                : (status.message ?? 'Статус сейчас недоступен.')}
+                          </p>
+                        )}
+                        {accountState.errors[account.id] && (
+                          <p className="notice error" role="alert">
+                            {accountState.errors[account.id]}
+                          </p>
+                        )}
+                        {status?.usage.length ? (
+                          <small className="muted">
+                            Проверено {new Date(status.checked_at * 1000).toLocaleString('ru-RU')}
+                          </small>
+                        ) : null}
+                        <button
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() => void run(() => client.openUsage(account.provider))}
+                        >
+                          Открыть мои лимиты <ArrowUpRight size={14} />
+                        </button>
+                      </article>
+                    );
+                  })}
+              </div>
+              {!accounts.some((a) => a.provider !== 'mock') && (
+                <div className="settings-empty">
+                  <Activity size={28} />
+                  <h4>Подключите аккаунт</h4>
+                  <p className="muted">Лимиты появятся после входа в ChatGPT или Claude.</p>
+                  <button className="secondary-button" onClick={() => setTab('Провайдеры')}>
+                    Перейти к аккаунтам
+                  </button>
+                </div>
+              )}
+            </>
+          )}
           {tab === 'Провайдеры' && (
             <>
               <div className="row-between">
-                <h3>Провайдеры агентов</h3>
+                <span className="small muted">Выберите провайдера, чтобы управлять аккаунтами</span>
                 <button
                   className="secondary-button"
                   disabled={busy}
@@ -285,10 +475,9 @@ export function Settings({
           )}
           {tab === 'Разрешения' && (
             <>
-              <h3>Профили разрешений</h3>
               <p className="muted">
-                Песочница и подтверждения провайдера всегда включены. BebekonCode добавляет свой
-                слой правил, но не отключает защиту Codex или Claude Code.
+                Профиль выбирается для отдельного чата или участника команды. По умолчанию работают
+                песочница и подтверждения провайдера.
               </p>
               <div className="provider-card">
                 <strong>По правилам провайдера</strong>
@@ -311,17 +500,34 @@ export function Settings({
                 разделе «Аккаунты». Дополнительный доступ требует подтверждения. Разрешение на
                 контекст относится к запросу одного агента, а не ко всей команде.
               </div>
+              <div className="provider-card">
+                <strong>Полный доступ · только Codex</strong>
+                <p>
+                  Включается явно в отдельном чате после видимого предупреждения. Codex получает
+                  доступ без песочницы и подтверждений команд. Режим недоступен для повторной
+                  проверки и автоматических рабочих сессий. Учётные данные остаются запрещены.
+                </p>
+              </div>
             </>
           )}
           {tab === 'Возможности' && (
             <>
-              <h3>Возможности провайдеров</h3>
-              <p className="muted">Возможности зависят от официального CLI выбранного аккаунта.</p>
               <div className="provider-card">
                 <strong>Делегирование между агентами</strong>
                 <p>
-                  Команда: до трёх участников, два параллельных анализа, один раунд обсуждения и
-                  общий итог. Авторазбиение: до четырёх подзадач. Модели и аккаунты выбираете вы.
+                  Команда: до трёх участников, общий итог от координатора. Раунд взаимной проверки
+                  на чтение проходит при двух и более участниках; одного участника проверяет
+                  координатор. При подключённых ChatGPT и Claude по умолчанию Codex координирует и
+                  запускает проверки, Claude анализирует и правит код. Авторазбиение: до четырёх
+                  подзадач на чтение. Модели, аккаунты и доступ выбираете вы.
+                </p>
+              </div>
+              <div className="provider-card">
+                <strong>Навыки Codex и вложения</strong>
+                <p>
+                  В разделе «Плагины → Установка Codex» можно подготовить запрос официальному
+                  skill-installer. Для плагинов OpenAI API установки пока недоступен. Прикреплённые
+                  изображения открываются по нажатию до отправки и в истории чата.
                 </p>
               </div>
               <div className="provider-card">

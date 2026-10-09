@@ -10,12 +10,14 @@ export function ExtensionsDialog({
   session,
   configure,
   close,
+  prepareInstall,
 }: {
   client: ClientTransport;
   data: Snapshot;
   session?: Session;
   configure: (session: Session) => void;
   close: () => void;
+  prepareInstall: (accountId: string, skill: string) => Promise<void>;
 }) {
   const [accountId, setAccountId] = useState(
     session?.account_profile_id ??
@@ -27,7 +29,12 @@ export function ExtensionsDialog({
   const [category, setCategory] = useState('all');
   const [inventory, setInventory] = useState<Extensions>();
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'catalog' | 'connected'>('catalog');
+  const [tab, setTab] = useState<'catalog' | 'connected' | 'install'>('catalog');
+  const [skill, setSkill] = useState('');
+  const [installAccount, setInstallAccount] = useState(
+    data.accounts.find((a) => a.provider === 'openai' && a.auth_status === 'signed_in')?.id ?? '',
+  );
+  const [preparing, setPreparing] = useState(false);
   const [catalog, setCatalog] = useState<PluginCatalog>();
   const [catalogError, setCatalogError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -90,6 +97,13 @@ export function ExtensionsDialog({
         >
           <Puzzle size={17} /> Подключённые
         </button>
+        <button
+          className={tab === 'install' ? 'selected' : ''}
+          aria-pressed={tab === 'install'}
+          onClick={() => setTab('install')}
+        >
+          <Sparkles size={17} /> Установка Codex
+        </button>
       </div>
       {tab === 'catalog' ? (
         <>
@@ -126,11 +140,11 @@ export function ExtensionsDialog({
             </button>
           </div>
           <div className="catalog-availability">
-            <strong>Установка в BebekonCode пока недоступна</strong>
+            <strong>Навыки Codex можно установить через официальный установщик</strong>
             <span>
-              У OpenAI API установки ещё в разработке. Расширения Claude пока не запускаются в
-              защищённом режиме Windows. Каталог показывает доступные предложения, а не подключённые
-              инструменты.
+              Откройте «Установка Codex», чтобы подготовить запрос skill-installer. API установки
+              плагинов OpenAI пока в разработке; плагины из этого каталога установить здесь нельзя.
+              Расширения Claude недоступны в защищённом режиме Windows.
             </span>
           </div>
           {loading && (
@@ -199,6 +213,79 @@ export function ExtensionsDialog({
             </p>
           )}
         </>
+      ) : tab === 'install' ? (
+        <section className="skill-install-panel">
+          <h3>Установить навык для Codex</h3>
+          <p className="muted">
+            Официальный skill-installer устанавливает навыки из каталога openai/skills. Запрос
+            откроется в отдельном чате выбранного аккаунта. Проверьте его и отправьте; установка
+            расходует лимит аккаунта и может потребовать подтверждения Codex.
+          </p>
+          <label className="field">
+            Аккаунт Codex
+            <select
+              aria-label="Аккаунт установки Codex"
+              value={installAccount}
+              disabled={preparing}
+              onChange={(e) => setInstallAccount(e.target.value)}
+            >
+              <option value="">Выберите аккаунт</option>
+              {data.accounts
+                .filter((a) => a.provider === 'openai' && a.auth_status === 'signed_in')
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {accountLabel(a)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="field">
+            Название навыка
+            <input
+              aria-label="Название устанавливаемого навыка"
+              placeholder="Например, gh-fix-ci или pdf"
+              value={skill}
+              disabled={preparing}
+              maxLength={64}
+              onChange={(e) => setSkill(e.target.value)}
+            />
+          </label>
+          <p className="small muted">
+            Для списка доступных навыков оставьте название пустым. Готовность установки проверяйте
+            по ответу установщика и в разделе «Подключённые».
+          </p>
+          {skill && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill) && (
+            <p className="field-error">Используйте латинские строчные буквы, цифры и дефис.</p>
+          )}
+          <button
+            className="primary-button"
+            disabled={
+              preparing || !installAccount || (!!skill && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill))
+            }
+            onClick={async () => {
+              setPreparing(true);
+              setError('');
+              try {
+                await prepareInstall(installAccount, skill);
+              } catch (reason) {
+                setError(errorText(reason));
+              } finally {
+                setPreparing(false);
+              }
+            }}
+          >
+            {preparing
+              ? 'Подготавливаю чат…'
+              : skill
+                ? 'Подготовить установку'
+                : 'Посмотреть доступные навыки'}
+          </button>
+          {error && (
+            <p className="notice error" role="alert">
+              {error}
+            </p>
+          )}
+        </section>
       ) : (
         <>
           <p className="muted dialog-description">
@@ -320,8 +407,9 @@ export function ExtensionsDialog({
                 ))}
           </div>
           <p className="muted small">
-            Установка новых расширений здесь пока недоступна. Показаны инструменты из официального
-            CLI выбранного аккаунта.
+            Навыки Codex устанавливаются во вкладке «Установка Codex». Показаны инструменты из
+            официального CLI выбранного аккаунта; наличие в каталоге не означает, что инструмент
+            подключён.
           </p>
           {agents.length > 0 && (
             <div className="extension-agent-actions">

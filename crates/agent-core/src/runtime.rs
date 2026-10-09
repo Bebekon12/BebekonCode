@@ -719,6 +719,27 @@ impl Core {
         self.engine(&account.provider)?.extensions(&account).await
     }
 
+    /// Only images explicitly attached to this chat may be returned to the client.
+    pub async fn attachment_image(&self, session_id: &str, path: &str) -> Result<String> {
+        let session = self.storage.session(session_id).await?;
+        let file: Option<String> = sqlx::query_scalar(
+            "SELECT file.value FROM events, json_each(events.payload, '$.files') AS file \
+             WHERE events.session_id = ? AND json_extract(events.payload, '$.type') = 'user_attachments' \
+             AND json_extract(file.value, '$.path') = ? LIMIT 1",
+        )
+        .bind(session_id)
+        .bind(path)
+        .fetch_optional(&self.storage.pool)
+        .await?;
+        let file: crate::attachments::AttachedFile =
+            serde_json::from_str(&file.ok_or_else(|| {
+                CoreError::Invalid("Изображение не прикреплено к этому чату".into())
+            })?)?;
+        tokio::task::spawn_blocking(move || crate::attachments::image_data_url(&session, &file))
+            .await
+            .map_err(|error| CoreError::Invalid(error.to_string()))?
+    }
+
     pub fn cancel(&self, session: &str) -> Result<()> {
         if let Some(token) = self.runs.lock().map_err(|_| CoreError::Busy)?.get(session) {
             token.cancel();

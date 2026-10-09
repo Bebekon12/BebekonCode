@@ -216,6 +216,27 @@ Recheck these sources before changing provider behavior or shipping a new provid
 
 ## Workspace access, attachments and visible progress (checked 2026-10-08)
 
+### Settings, quota availability and Codex skill setup (checked 2026-10-09)
+
+- Re-fetched official [SIWC accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions),
+  [SIWC preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations),
+  [Codex app-server](https://learn.chatgpt.com/docs/app-server) and
+  [Build skills](https://learn.chatgpt.com/docs/build-skills). The SIWC account route documents
+  a link to ChatGPT Settings → Usage, not a percentage polling API. The app-server quota method
+  is documented for ChatGPT authentication, not our env-key SIWC provider. Refresh no longer
+  calls that incompatible quota method. The UI explains this and offers the official usage page instead of promising a retry
+  will provide percentages. No private usage endpoint or official-client credential is accessed.
+- `plugin/install`, `plugin/uninstall`, `plugin/list` and `plugin/read` remain explicitly
+  under development with "Don't call this method from production clients yet". No production
+  plugin installation API has been enabled. Codex skill setup prepares a user-reviewed draft
+  in a separate, explicitly selected account's standard-access chat invoking the documented
+  `$skill-installer` workflow for the official `openai/skills` catalog. Nothing installs until
+  the user sends the draft. Normal sandbox approvals apply; completion must be confirmed from
+  the installer's result and refreshed inventory. This is skill setup, not marketplace plugin installation.
+- Attachment preview returns only a raster image recorded in the requested chat's attachment
+  events, inside that chat's `.bebekon-attachments` directory. Size limits, path boundaries and
+  raster signatures are rechecked. It does not expose arbitrary local file URLs or expand Tauri asset scope.
+
 ### Follow-up verification (2026-10-08)
 
 - Codex quotas are requested through documented `account/rateLimits/read` and updated from

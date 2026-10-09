@@ -56,6 +56,7 @@ const state: Snapshot = {
 };
 let sequence = 0;
 const history: AgentEvent[] = [];
+const attachmentImages = new Map<string, string>();
 const listeners = new Set<(event: AgentEvent) => void>();
 const accountListeners = new Set<(event: AccountEvent) => void>();
 const cancelled = new Set<string>();
@@ -112,6 +113,11 @@ function previewStatus(accountId: string): AccountStatus {
 
 const reviewComments: ReviewComment[] = [];
 export const preview: ClientTransport = {
+  attachmentImage: async (sessionId, path) => {
+    const src = attachmentImages.get(`${sessionId}:${path}`);
+    if (!src) throw new Error('Изображение не найдено в истории предпросмотра.');
+    return src;
+  },
   reviewDocument: async (_workspaceId, path) => ({
     kind: path.split('.').at(-1) ?? 'txt',
     fingerprint: 'preview-document-v1',
@@ -283,11 +289,12 @@ export const preview: ClientTransport = {
     if (attachments.length)
       emit({
         type: 'user_attachments',
-        files: attachments.map((file) => ({
-          name: file.name,
-          mime: file.mime,
-          path: `Предпросмотр/${file.name}`,
-        })),
+        files: attachments.map((file) => {
+          const path = `Предпросмотр/${run}/${file.name}`;
+          if (file.mime.startsWith('image/'))
+            attachmentImages.set(`${sessionId}:${path}`, `data:${file.mime};base64,${file.data}`);
+          return { name: file.name, mime: file.mime, path };
+        }),
       });
     emit({
       type: 'agent_configuration',

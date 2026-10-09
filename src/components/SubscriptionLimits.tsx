@@ -105,9 +105,14 @@ export function SubscriptionLimits({
                     {!s.usage.length && (
                       <span className="limit-note">
                         {a.provider === 'anthropic'
-                          ? 'CLI не предоставил проценты лимитов'
-                          : 'CLI не предоставил остаток'}
+                          ? 'Проценты не получены от Claude CLI'
+                          : 'Проценты для этого подключения недоступны'}
                       </span>
+                    )}
+                    {!s.usage.length && s.message && (
+                      <p className="limit-note" title={s.message}>
+                        {s.message}
+                      </p>
                     )}
                     {s.usage_detail && (
                       <details className="limit-cli-detail">
@@ -116,6 +121,15 @@ export function SubscriptionLimits({
                       </details>
                     )}
                     {s.limit_reached && <span className="field-error">Лимит исчерпан</span>}
+                    {s.usage.length > 0 && (
+                      <span className="limit-note">
+                        Данные на{' '}
+                        {new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
                     {error && (
                       <span className="limit-note limit-stale" title={error}>
                         Не удалось обновить · данные на{' '}
@@ -130,7 +144,7 @@ export function SubscriptionLimits({
                       onClick={() => openUsage(a.provider)}
                       title="Открыть использование у провайдера"
                     >
-                      Использование <ArrowUpRight size={12} />
+                      Открыть мои лимиты <ArrowUpRight size={12} />
                     </button>
                   </>
                 ) : (
