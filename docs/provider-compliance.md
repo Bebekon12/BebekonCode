@@ -1,6 +1,6 @@
 # Provider compliance
 
-Official documentation last checked: **2026-10-09**. This records technical integration research
+Official documentation last checked: **2026-10-10**. This records technical integration research
 and the resulting design. It is not a claim of provider approval or a legal audit.
 
 Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
@@ -12,6 +12,49 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 - No credential sharing or export.
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
+
+## Claude full access and automatic edits (0.8.9, checked 2026-10-10)
+
+Rechecked the official [permission modes](https://code.claude.com/docs/en/permission-modes),
+[permissions](https://code.claude.com/docs/en/permissions),
+[CLI reference](https://code.claude.com/docs/en/cli-reference),
+[hooks](https://code.claude.com/docs/en/hooks) and
+[environment variables](https://code.claude.com/docs/en/env-vars).
+This section supersedes earlier statements that Claude full access is unavailable.
+
+- The owner explicitly requested Claude full access. It is a per-chat opt-in behind the existing
+  visible warning and confirmation, never a default. Rust accepts it for Anthropic, Codex and
+  the demo only. Changing providers resets the profile to standard. Review rounds and automatic
+  planning workers remain read-only.
+- Claude full access uses documented `--permission-mode bypassPermissions` and a matching
+  settings default. `--restricted` is omitted only in this profile because the documented
+  restricted mode refuses bypass permissions. The explicit tool list, no setting sources,
+  strict app-managed MCP configuration, disabled slash commands/native Skill/plugins, hooks,
+  account binding and telemetry suppression remain. No authentication changes or new endpoints.
+- Ordinary shell commands and file writes receive no application approval in full access.
+  Explicit ask rules for these tools are absent; PreToolUse returns no allow override, preserving
+  provider deny rules and mandatory checks. Unexpected PermissionRequest events still require
+  user consent. A reported startup permission-mode mismatch stops the turn, without fallback.
+- Full-access file tools can reach validated local files outside the project. Credential names,
+  app-managed provider profiles, Git/service internals, traversal, reparse points and UNC shares
+  remain blocked; selected account skill resources remain read-only. Generic unsandboxed shell
+  and MCP executables do not provide filesystem/credential isolation. Credential access remains
+  prohibited by policy, not claimed to be enforced by an OS sandbox on native Windows.
+- Every selected MCP call retains fresh consent in all modes. Arbitrary tool names are insufficient
+  to establish that a call cannot capture the desktop or control input. In full access the bridge
+  waits at PreToolUse, before execution, without depending on a provider PermissionRequest.
+  Consent is visible in the action panel and cannot be remembered for the session. This conservative
+  limitation also covers scene capture and computer-use tools. No native computer-use integration
+  or remote listener is added.
+- Workspace auto still means `acceptEdits`, with project path checks and per-call shell/MCP consent.
+  On official CLI 2.1.294, the subprocess scrub flag forces automatic modes back to default.
+  It is retained for standard/read-only, omitted for acceptEdits and bypassPermissions; the Rust
+  process environment remains an allowlist with no inherited provider credentials. The documented
+  scrub is defense in depth and is not an OS security boundary. A mode mismatch is a visible failure.
+- Validation includes the subprocess fixture, returning from full access to standard, external
+  file/credential-path guards, per-call MCP consent, browser warning/cancel/confirm flows, and the
+  official native CLI in fresh signed-out profiles (no inference). Authenticated model/tool use
+  and installation over the user's running app are not claimed as tested.
 
 ## Codex plugin manager and compact interface (0.8.8, checked 2026-10-09)
 

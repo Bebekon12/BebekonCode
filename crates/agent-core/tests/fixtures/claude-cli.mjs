@@ -24,19 +24,26 @@ if (args[0] === 'auth') {
   process.exit(0);
 }
 const option = (name) => args[args.indexOf(name) + 1];
+const bypass = option('--permission-mode') === 'bypassPermissions';
+const auto = option('--permission-mode') === 'acceptEdits';
 if (
-  !args.includes('--restricted') ||
+  args.includes('--restricted') === bypass ||
   !args.includes('--disable-slash-commands') ||
-  option('--permission-mode') !== 'default' ||
+  !['default', 'acceptEdits', 'bypassPermissions'].includes(option('--permission-mode')) ||
+  process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB !== (bypass || auto ? undefined : '1') ||
   option('--setting-sources') !== '' ||
   !args.includes('--strict-mcp-config')
 )
   process.exit(24);
 const settings = JSON.parse(option('--settings'));
 if (
-  !['Edit', 'Write', 'Bash', 'PowerShell', 'mcp__*'].every((tool) =>
-    settings.permissions.ask.includes(tool),
-  )
+  settings.permissions.defaultMode !== option('--permission-mode') ||
+  !settings.permissions.deny.includes('Read(./**/.env*)') ||
+  (bypass
+    ? settings.permissions.ask.length !== 0
+    : !(
+        auto ? ['Bash', 'PowerShell', 'mcp__*'] : ['Edit', 'Write', 'Bash', 'PowerShell', 'mcp__*']
+      ).every((tool) => settings.permissions.ask.includes(tool)))
 )
   process.exit(25);
 const pipe = settings.hooks.PreToolUse[0].hooks[0].args[1];
@@ -67,7 +74,12 @@ fs.appendFileSync(
     effort: args.includes('--effort') ? option('--effort') : null,
   }) + '\n',
 );
-send({ type: 'system', subtype: 'init', session_id: id });
+send({
+  type: 'system',
+  subtype: 'init',
+  session_id: id,
+  permissionMode: prompt.includes('[WRONG_MODE]') ? 'default' : option('--permission-mode'),
+});
 if (prompt.includes('[WAIT]')) await new Promise(() => setInterval(() => {}, 1000));
 if (prompt.includes('[LIMIT]')) {
   send({
@@ -81,7 +93,10 @@ if (prompt.includes('[LIMIT]')) {
 if (prompt.includes('[WRITE]')) {
   const tool_input = { file_path: 'approved.txt', content: 'Approved through the local pipe' };
   const before = await exchange({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input });
-  if (before.hookSpecificOutput.permissionDecision === 'ask') {
+  // Mirrors bypassPermissions: no hook decision means the call runs without a prompt.
+  if ((bypass || auto) && !before.hookSpecificOutput)
+    fs.writeFileSync('approved.txt', tool_input.content);
+  if (before.hookSpecificOutput?.permissionDecision === 'ask') {
     const decision = await exchange({
       hook_event_name: 'PermissionRequest',
       tool_name: 'Write',
@@ -90,6 +105,14 @@ if (prompt.includes('[WRITE]')) {
     if (decision.hookSpecificOutput.decision.behavior === 'allow')
       fs.writeFileSync('approved.txt', tool_input.content);
   }
+}
+if (prompt.includes('[SHELL]')) {
+  const before = await exchange({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'PowerShell',
+    tool_input: { command: 'Write-Output fixture' },
+  });
+  if (bypass && !before.hookSpecificOutput) fs.writeFileSync('shell.txt', 'ran without prompt');
 }
 if (args.includes('--json-schema')) {
   send({

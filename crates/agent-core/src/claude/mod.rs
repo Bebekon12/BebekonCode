@@ -126,7 +126,7 @@ impl ClaudeProvider {
         }
         // Only documented public status fields; never inspect credential files.
         let signed_in = success && value.get("loggedIn").and_then(Value::as_bool) == Some(true);
-        Ok(AccountStatus { account_id: account.id.clone(), state: if signed_in { "signed_in" } else { "signed_out" }.into(), email: value.get("email").and_then(Value::as_str).map(str::to_string), plan: value.get("subscriptionType").and_then(Value::as_str).map(str::to_string), manage_usage_url: Some(USAGE_URL.into()), message: Some("Авторизация хранится только официальным CLI в отдельном профиле. Навыки доступны; shell и MCP без песочницы Windows требуют подтверждения каждого вызова. Плагины и полный доступ Claude недоступны.".into()), checked_at: now(), ..AccountStatus::default() })
+        Ok(AccountStatus { account_id: account.id.clone(), state: if signed_in { "signed_in" } else { "signed_out" }.into(), email: value.get("email").and_then(Value::as_str).map(str::to_string), plan: value.get("subscriptionType").and_then(Value::as_str).map(str::to_string), manage_usage_url: Some(USAGE_URL.into()), message: Some("Авторизация хранится только официальным CLI в отдельном профиле. Навыки доступны. Полный доступ включается отдельно в чате: обычные правки и shell без вопросов, MCP с подтверждением каждого вызова. Песочницы ОС Windows нет. Плагины недоступны.".into()), checked_at: now(), ..AccountStatus::default() })
     }
 }
 
@@ -224,7 +224,7 @@ impl AgentProvider for ClaudeProvider {
             available,
             detected_path: d.binary.map(|p| p.to_string_lossy().into_owned()),
             detail: if available {
-                format!("Claude Code {}. Отдельный вход через Anthropic. Файлы проекта и навыки; shell и локальный MCP с подтверждением каждого вызова. Без песочницы ОС Windows. Плагины и полный доступ недоступны.", d.version.unwrap_or_default())
+                format!("Claude Code {}. Отдельный вход через Anthropic. Файлы и навыки; полный доступ включается для отдельного чата. В обычном и авторежиме shell с подтверждением; MCP с подтверждением в любом режиме. Без песочницы ОС Windows. Плагины недоступны.", d.version.unwrap_or_default())
             } else {
                 format!("Нужен официальный нативный Claude Code {MIN_VERSION}+ для Windows. Выполните claude update и нажмите «Обновить».")
             },
@@ -397,7 +397,7 @@ impl AgentProvider for ClaudeProvider {
             ));
         }
         access::Access::for_request(&request)?;
-        // Claude keeps its guarded modes; full access is validated as Codex-only before this.
+        // Access is chosen per chat; only documented profiles are accepted.
         crate::permissions::validate_profile("anthropic", &request.session.permission_profile)?;
         if !self.models(&request.account).await?.iter().any(|model| {
             model.id == request.session.model
@@ -512,6 +512,7 @@ impl ClaudeProvider {
             &std::env::current_exe()?,
             &request.session.permission_profile,
         );
+        let mode = guard::permission_mode(&request.session.permission_profile);
         let mut command = self.command(Some(&request.account))?;
         command.current_dir(&root).args([
             "--print",
@@ -521,13 +522,14 @@ impl ClaudeProvider {
             "--include-partial-messages",
             "--input-format",
             "stream-json",
-            "--restricted",
+        ]);
+        // Restricted mode refuses bypassPermissions; full access keeps the hook and deny rules.
+        if mode != "bypassPermissions" {
+            command.arg("--restricted");
+        }
+        command.args([
             "--permission-mode",
-            if request.session.permission_profile == "workspace_auto" {
-                "acceptEdits"
-            } else {
-                "default"
-            },
+            mode,
             "--setting-sources",
             "",
             "--strict-mcp-config",
@@ -548,9 +550,16 @@ impl ClaudeProvider {
             command.arg("--add-dir").arg(directory);
         }
         if !access.skills.is_empty() {
-            command.args(["--append-system-prompt", &access.guidance()]);
+            command.args([
+                "--append-system-prompt",
+                &access.guidance(mode == "bypassPermissions"),
+            ]);
         }
-        command.env("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1");
+        // CLI 2.1.294 forces the default permission mode while the scrub is on. The child
+        // environment is already an allowlist, so the scrub is dropped only for automatic modes.
+        if mode == "default" {
+            command.env("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1");
+        }
         command.args([
             "--model",
             &request.session.model,
@@ -645,7 +654,16 @@ impl ClaudeProvider {
         loop {
             let next = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()), _ = &mut deadline => return Err(failure("Claude превысил время выполнения запроса", None)), next = lines.recv() => next };
             let Some(next) = next else { break };
-            for payload in state.accept(next?)? {
+            let value = next?;
+            if value["type"] == "system"
+                && value["subtype"] == "init"
+                && value["permissionMode"]
+                    .as_str()
+                    .is_some_and(|actual| actual != mode)
+            {
+                return Err(failure("Claude не применил выбранный режим доступа. Проверьте политику Claude Code; режим автоматически не заменяется.", None));
+            }
+            for payload in state.accept(value)? {
                 tokio::select! { _ = cancel.cancelled() => return Ok(()), sent = events.send(payload) => { if sent.is_err() { return Ok(()); } } }
             }
         }

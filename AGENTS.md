@@ -7,7 +7,8 @@ reverse engineer authentication, impersonate providers, or use undocumented cons
 Never copy credentials from official clients. Never log secrets or put them in SQLite, frontend,
 configuration, Git, or crash metadata. Keep provider sandboxes and approvals enabled by default.
 Exception approved by the owner: the user may explicitly switch an individual chat to full access
-where the provider documents it (Codex `dangerFullAccess` with `approvalPolicy=never`). It is never
+where the provider documents it (Codex `dangerFullAccess` with `approvalPolicy=never`, Claude
+`bypassPermissions`). It is never
 a default, is confirmed with a visible warning, never applies to read-only review/auto workers or
 to providers without such a documented mode, and credentials stay off-limits.
 Local computer-use tools (screen, mouse, keyboard) require per-action user confirmation and a

@@ -100,8 +100,10 @@ export function AgentPicker({
           <summary>Возможности Claude в Windows</summary>
           <p>
             Модель и доступ проверяет Anthropic. Доступны файлы проекта и инструкции выбранных
-            навыков аккаунта. Команды shell и локальный MCP требуют отдельного подтверждения:
-            песочницы ОС Windows нет. Встроенный Skill, плагины и полный доступ Claude недоступны.
+            навыков аккаунта. В обычном и авторежиме команды shell и локальный MCP требуют
+            отдельного подтверждения: песочницы ОС Windows нет. В полном доступе обычные команды и
+            правки выполняются без вопросов; экран и управление вводом требуют подтверждения каждого
+            действия. Встроенный Skill и плагины недоступны.
           </p>
         </details>
       )}
@@ -207,7 +209,7 @@ export function AgentPicker({
             <option value="workspace_auto">Авто в проекте</option>
             <option value="read_only">Только чтение</option>
             <option value="full_access" disabled={!fullAccessProviders.includes(value.provider)}>
-              Полный доступ{fullAccessProviders.includes(value.provider) ? '' : ' — только Codex'}
+              Полный доступ{fullAccessProviders.includes(value.provider) ? '' : ' — недоступен'}
             </option>
           </select>
           {value.permission_profile === 'full_access' ? (

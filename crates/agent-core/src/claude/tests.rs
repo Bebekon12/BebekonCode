@@ -159,8 +159,8 @@ fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
             .enabled
     );
     let selected = access::Access::for_request(&request).unwrap();
-    assert!(selected.guidance().contains("safe"));
-    assert!(!selected.guidance().contains("/hooks/"));
+    assert!(selected.guidance(false).contains("safe"));
+    assert!(!selected.guidance(false).contains("/hooks/"));
     std::fs::write(profile.join("bebekon-mcp.json"), "[]").unwrap();
     assert!(selected
         .checked_file(
@@ -178,6 +178,24 @@ fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
         )
         .is_ok());
     assert!(selected.skill_read(&input, "Write").is_err());
+    assert!(selected.checked_full_file(&project, &input, "Read").is_ok());
+    assert!(selected
+        .checked_full_file(&project, &input, "Write")
+        .is_err());
+    assert!(selected
+        .checked_full_file(
+            &project,
+            &json!({"file_path":profile.join("new.txt").to_string_lossy().to_uppercase()}),
+            "Write"
+        )
+        .is_err());
+    assert!(selected
+        .checked_full_file(
+            &project,
+            &json!({"file_path":profile.join("bebekon-mcp.json")}),
+            "Read"
+        )
+        .is_err());
     assert!(selected
         .skill_read(
             &json!({"file_path":profile.join(".credentials.json")}),
@@ -195,7 +213,7 @@ fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
         .is_empty());
     assert!(access::Access::for_request(&request)
         .unwrap()
-        .guidance()
+        .guidance(false)
         .is_empty());
     request.session.tool_policy = "{}".into();
     request.session.permission_profile = "read_only".into();
@@ -372,7 +390,7 @@ async fn installed_cli_accepts_restricted_launch_and_reports_missing_auth() {
     let provider = ClaudeProvider::new(notifications);
     provider.refresh().await;
     provider.ready().unwrap();
-    let request = turn(temp.path());
+    let mut request = turn(temp.path());
     std::fs::create_dir_all(temp.path().join("skills/preflight")).unwrap();
     std::fs::write(
         temp.path().join("skills/preflight/SKILL.md"),
@@ -383,17 +401,169 @@ async fn installed_cli_accepts_restricted_launch_and_reports_missing_auth() {
         provider.auth_status(&request.account).await.unwrap().state,
         "signed_out"
     );
+    for profile in ["standard", "workspace_auto", "full_access", "read_only"] {
+        request.session.permission_profile = profile.into();
+        let (tx, _rx) = mpsc::channel(64);
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            provider.drive(&request, tx, CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(result, Err(CoreError::Provider { kind: Some(kind), .. }) if kind == "auth"),
+            "official CLI must apply {profile}, parse configured flags and refuse inference without our own login"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn automatic_profiles_write_without_approval_and_full_access_runs_shell() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let profile = temp.path().join("profile");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&profile).unwrap();
+    std::fs::create_dir(&project).unwrap();
+    let mut request = turn(&project);
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    for access in ["workspace_auto", "full_access"] {
+        request.session.permission_profile = access.into();
+        request.prompt = "[WRITE] [SHELL]".into();
+        let (tx, mut rx) = mpsc::channel(64);
+        provider
+            .run(request.clone(), tx, CancellationToken::new())
+            .await
+            .unwrap();
+        while let Some(event) = rx.recv().await {
+            assert!(!matches!(event, EventPayload::ApprovalRequested { .. }));
+        }
+        assert!(project.join("approved.txt").is_file());
+        assert_eq!(project.join("shell.txt").is_file(), access == "full_access");
+        std::fs::remove_file(project.join("approved.txt")).unwrap();
+    }
+    // A provider refusing the requested mode must stop before tools run, without fallback.
+    request.prompt = "[WRONG_MODE] [WRITE]".into();
     let (tx, _rx) = mpsc::channel(64);
-    let result = tokio::time::timeout(
-        Duration::from_secs(30),
-        provider.drive(&request, tx, CancellationToken::new()),
-    )
-    .await
-    .unwrap();
-    assert!(
-        matches!(result, Err(CoreError::Provider { kind: Some(kind), .. }) if kind == "auth"),
-        "official CLI must parse all configured flags and refuse inference without our own login"
-    );
+    let error = provider
+        .run(request.clone(), tx, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("не применил выбранный режим доступа"));
+    assert!(!project.join("approved.txt").exists());
+    request.prompt = "[WRITE]".into();
+    // Returning to standard must prompt again: automatic runs create no remembered grants.
+    request.session.permission_profile = "standard".into();
+    let (tx, mut rx) = mpsc::channel(64);
+    let engine = provider.clone();
+    let session = request.session.id.clone();
+    let job = tokio::spawn(async move { engine.run(request, tx, CancellationToken::new()).await });
+    let mut approvals = 0;
+    while let Some(event) = rx.recv().await {
+        if let EventPayload::ApprovalRequested { id, .. } = event {
+            approvals += 1;
+            provider
+                .resolve_approval(&session, &id, ApprovalDecision::Deny)
+                .await
+                .unwrap();
+        }
+    }
+    job.await.unwrap().unwrap();
+    assert_eq!(approvals, 1);
+    assert!(!project.join("approved.txt").exists());
+    assert!(provider.grants.lock().unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn full_access_keeps_file_guards_and_requires_fresh_mcp_consent_before_execution() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(temp.path().join("outside.txt"), "test").unwrap();
+    std::fs::write(temp.path().join(".env"), "test only").unwrap();
+    let mut session = turn(&project).session;
+    session.permission_profile = "full_access".into();
+    let mut access = access::Access::default();
+    access.mcp = vec![crate::mcp::LocalMcpServer {
+        name: "unity".into(),
+        command: "C:/tools/unity.exe".into(),
+        args: vec![],
+    }];
+    assert!(access
+        .checked_file(
+            &project,
+            &json!({"file_path":temp.path().join("outside.txt")}),
+            "Read"
+        )
+        .is_err());
+    assert!(access
+        .checked_full_file(
+            &project,
+            &json!({"file_path":temp.path().join("outside.txt")}),
+            "Read"
+        )
+        .is_ok());
+    assert!(access
+        .checked_full_file(&project, &json!({"file_path":"new.txt"}), "Write")
+        .unwrap()
+        .ends_with("project/new.txt"));
+    for path in [
+        temp.path().join(".env"),
+        temp.path().join(".ssh/id_rsa"),
+        project.join("../outside.txt"),
+        PathBuf::from(r"\\server\share\file.txt"),
+    ] {
+        assert!(access
+            .checked_full_file(&project, &json!({"file_path":path}), "Read")
+            .is_err());
+    }
+    let (tx, mut rx) = mpsc::channel(64);
+    for decision in [ApprovalDecision::AllowOnce, ApprovalDecision::Deny] {
+        let engine = provider.clone();
+        let session_copy = session.clone();
+        let access_copy = access.clone();
+        let events = tx.clone();
+        let job = tokio::spawn(async move {
+            guard::decide_with_access(&session_copy, json!({"hook_event_name":"PreToolUse","tool_name":"mcp__unity__capture_scene_view","tool_input":{}}), &events, &CancellationToken::new(), &engine.pending, &engine.grants, &access_copy).await
+        });
+        let id = loop {
+            if let EventPayload::ApprovalRequested {
+                id,
+                available_decisions,
+                ..
+            } = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+            {
+                assert_eq!(
+                    available_decisions,
+                    Some(vec![ApprovalDecision::AllowOnce, ApprovalDecision::Deny])
+                );
+                break id;
+            }
+        };
+        assert!(provider
+            .resolve_approval(&session.id, &id, ApprovalDecision::AllowSession)
+            .await
+            .is_err());
+        provider
+            .resolve_approval(&session.id, &id, decision)
+            .await
+            .unwrap();
+        let result = job.await.unwrap();
+        if decision == ApprovalDecision::AllowOnce {
+            assert_eq!(result, json!({}));
+        } else {
+            assert_eq!(result["hookSpecificOutput"]["permissionDecision"], "deny");
+        }
+    }
+    assert!(provider.grants.lock().unwrap().is_empty());
 }
 
 #[cfg(windows)]

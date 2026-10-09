@@ -43,11 +43,23 @@ pub(super) fn settings(pipe: &str, executable: &Path, profile: &str) -> Value {
     if profile == "read_only" {
         deny.extend(["Edit", "Write", "Bash", "PowerShell", "Skill", "mcp__*"]);
     }
-    let mut ask = vec!["Bash", "PowerShell", "mcp__*"];
-    if profile != "workspace_auto" {
+    // Ask rules prompt even in bypassPermissions, so full access relies on deny rules and the hook.
+    let mut ask = vec![];
+    if profile != "full_access" {
+        ask.extend(["Bash", "PowerShell", "mcp__*"]);
+    }
+    if !["workspace_auto", "full_access"].contains(&profile) {
         ask.extend(["Edit", "Write"]);
     }
-    json!({"permissions":{"defaultMode":if profile == "workspace_auto" { "acceptEdits" } else { "default" }, "ask":ask, "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
+    json!({"permissions":{"defaultMode":permission_mode(profile), "ask":ask, "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
+}
+
+pub(super) fn permission_mode(profile: &str) -> &'static str {
+    match profile {
+        "workspace_auto" => "acceptEdits",
+        "full_access" => "bypassPermissions",
+        _ => "default",
+    }
 }
 
 fn response(event: &str, allowed: bool) -> Value {
@@ -292,9 +304,12 @@ pub(super) async fn decide_with_access(
     if cancel.is_cancelled() {
         return response(event, false);
     }
+    let writable = ["standard", "workspace_auto", "full_access"]
+        .contains(&session.permission_profile.as_str());
+    let full = session.permission_profile == "full_access";
     let external = ["Bash", "PowerShell"].contains(&tool) || access.is_mcp_tool(tool);
     if external {
-        if !["standard", "workspace_auto"].contains(&session.permission_profile.as_str()) {
+        if !writable {
             return response(event, false);
         }
         let input = &value["tool_input"];
@@ -309,16 +324,33 @@ pub(super) async fn decide_with_access(
         {
             return response(event, false);
         }
+        if full && event == "PreToolUse" {
+            if access.is_mcp_tool(tool) {
+                // Arbitrary MCP names cannot prove the tool does not capture the screen or
+                // control input. Approve here: bypass mode need not emit PermissionRequest.
+                let answer =
+                    manual_decision(session, value, None, events, cancel, pending, grants).await;
+                return if answer["hookSpecificOutput"]["decision"]["behavior"] == "allow" {
+                    json!({})
+                } else {
+                    response("PreToolUse", false)
+                };
+            }
+            // No hook allow override: provider deny rules and mandatory checks still apply.
+            return json!({});
+        }
         if event == "PreToolUse" {
             return response(event, true);
         }
         return manual_decision(session, value, None, events, cancel, pending, grants).await;
     }
-    let Ok(path) = access.checked_file(
-        Path::new(&session.working_directory),
-        &value["tool_input"],
-        tool,
-    ) else {
+    let root = Path::new(&session.working_directory);
+    let checked = if full {
+        access.checked_full_file(root, &value["tool_input"], tool)
+    } else {
+        access.checked_file(root, &value["tool_input"], tool)
+    };
+    let Ok(path) = checked else {
         return response(event, false);
     };
     if ["Read", "Glob", "Grep"].contains(&tool) {
@@ -328,10 +360,11 @@ pub(super) async fn decide_with_access(
             response(event, false)
         };
     }
-    if !["standard", "workspace_auto"].contains(&session.permission_profile.as_str())
-        || cancel.is_cancelled()
-    {
+    if !writable || cancel.is_cancelled() {
         return response(event, false);
+    }
+    if full && event == "PreToolUse" {
+        return json!({});
     }
     if session.permission_profile == "workspace_auto" {
         return if event == "PreToolUse" {
