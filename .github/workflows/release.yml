@@ -57,7 +57,7 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
-          uploadUpdaterJson: true
+          uploadUpdaterJson: false
           updaterJsonPreferNsis: true
       - name: Audit packaged Claude approval hook
         if: steps.published.outputs.ready != 'true'
@@ -70,7 +70,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Local updater manifest failed' }
           npm run test:updater
           if ($LASTEXITCODE -ne 0) { throw 'Updater signature audit failed' }
-      - name: Upload standalone Windows executable
+      - name: Upload standalone executable and audited updater manifest
         if: steps.published.outputs.ready != 'true'
         shell: pwsh
         env:
@@ -81,6 +81,9 @@ jobs:
           $standalone = "target/release/BebekonCode_${releaseVersion}_x64.exe"
           Copy-Item -LiteralPath 'target/release/bebekoncode-desktop.exe' -Destination $standalone
           gh release upload $env:RELEASE_TAG $standalone --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone executable upload failed' }
+          gh release upload $env:RELEASE_TAG 'target/release/latest.json' --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Audited updater manifest upload failed' }
       - name: Verify updater assets and publish complete release
         shell: pwsh
         env:
