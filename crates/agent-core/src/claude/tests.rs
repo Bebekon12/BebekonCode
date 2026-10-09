@@ -130,7 +130,8 @@ async fn shell_and_mcp_always_require_fresh_consent_even_in_auto() {
 #[test]
 fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
     let temp = crate::test_support::TestDirectory::new().unwrap();
-    let profile = temp.path().join("profile");
+    // A Windows account path can differ from canonical spelling (case or an 8.3 alias).
+    let profile = PathBuf::from(temp.path().join("profile").to_string_lossy().to_lowercase());
     let project = temp.path().join("project");
     std::fs::create_dir_all(profile.join("skills/safe")).unwrap();
     std::fs::create_dir_all(profile.join("skills/hooks")).unwrap();
@@ -170,6 +171,12 @@ fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
         .is_err());
     let input = json!({"file_path":profile.join("skills/safe/SKILL.md")});
     assert!(selected.skill_read(&input, "Read").is_ok());
+    assert!(selected
+        .skill_read(
+            &json!({"file_path":profile.join("skills/safe/SKILL.md").canonicalize().unwrap()}),
+            "Read"
+        )
+        .is_ok());
     assert!(selected.skill_read(&input, "Write").is_err());
     assert!(selected
         .skill_read(

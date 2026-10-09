@@ -101,14 +101,14 @@ impl Access {
             ));
         }
         let inventory = inventory(&request.account)?;
-        let account_root = Path::new(
+        let configured_root = Path::new(
             request
                 .account
                 .config_dir
                 .as_deref()
                 .ok_or(CoreError::ProviderUnavailable)?,
-        )
-        .canonicalize()?;
+        );
+        let account_root = configured_root.canonicalize()?;
         let protected_root = if account_root
             .parent()
             .and_then(Path::file_name)
@@ -122,7 +122,7 @@ impl Access {
                 .unwrap_or(&account_root)
                 .to_path_buf()
         } else {
-            account_root
+            account_root.clone()
         };
         for (selected, items) in [
             (&policy.skills, &inventory.skills),
@@ -151,7 +151,12 @@ impl Access {
                 .parent()
                 .ok_or(CoreError::Invalid("Путь навыка".into()))?
                 .to_path_buf();
-            skills.insert(item.name, directory);
+            // Retain the configured spelling so the path guard can accept Windows case
+            // differences and short aliases while still validating each relative component.
+            let relative = directory
+                .strip_prefix(&account_root)
+                .map_err(|_| CoreError::Invalid("Путь навыка за пределами аккаунта".into()))?;
+            skills.insert(item.name, configured_root.join(relative));
         }
         let mcp = mcp::read(&request.account)?
             .into_iter()

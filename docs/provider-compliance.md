@@ -81,6 +81,15 @@ and [ChatGPT-plan preview limitations](https://developers.openai.com/siwc/token-
   confirmed by the user, with a visible indicator and stop control in every access mode. Not
   implemented yet; see `docs/computer-use.md`.
 
+## Windows account skill paths (0.8.6, checked 2026-10-09)
+
+Rechecked the official [Claude permissions reference](https://code.claude.com/docs/en/permissions).
+Selected account skill roots retain the configured Windows spelling, including case differences
+and short 8.3 aliases. Relative skill paths are derived from the canonical account root and still
+pass the existing traversal, credential-name and reparse-point checks. This fixes the clean
+Windows CI failure in 0.8.5 without adding tools, approval bypasses or authentication modes.
+The regression checks both configured and canonical spellings. The v0.8.5 tag is preserved.
+
 ## Unity skills and Claude tool access (owner request 2026-10-09)
 
 The owner asked to lift Claude restrictions where Anthropic's rules allow it. The team reviewer
