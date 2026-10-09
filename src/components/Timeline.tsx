@@ -1,8 +1,9 @@
 import { ChatMarkdown } from './ChatMarkdown';
+import { RunChanges, type ChangeSource } from './RunChanges';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { effortLabels } from '../chat';
 import { attachmentHint } from '../attachments';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Ban,
@@ -57,7 +58,7 @@ export function Timeline({
   events,
   session,
   providerName,
-  loadOlder,
+  historyLoading = false,
   openFiles,
   openTerminal,
   cancel,
@@ -65,11 +66,13 @@ export function Timeline({
   retry,
   chooseAnotherAccount,
   manageUsage,
+  changes,
 }: {
   events: AgentEvent[];
   session: Session;
   providerName: string;
-  loadOlder: () => void;
+  /** Older pages of the stored history are still being loaded. */
+  historyLoading?: boolean;
   openFiles: () => void;
   openTerminal: () => void;
   cancel: () => void;
@@ -77,6 +80,8 @@ export function Timeline({
   retry: (prompt: string) => void;
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
+  /** Project change summary under the latest finished answer; absent without a Git project. */
+  changes?: ChangeSource;
 }) {
   const demo = session.provider === 'mock';
   const team =
@@ -107,14 +112,60 @@ export function Timeline({
   const allCollapsed = turns.length > 0 && turns.every((turn) => collapsed.has(turn.id));
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
-  useEffect(() => {
-    if (follow.current)
-      scroll.current?.scrollTo({ top: events.length ? scroll.current.scrollHeight : 0 });
+  const lastHeight = useRef(0);
+  const firstSequence = useRef<number | undefined>(undefined);
+  const [activeTurn, setActiveTurn] = useState('');
+  useLayoutEffect(() => {
+    const element = scroll.current;
+    if (!element) return;
+    const first = events[0]?.sequence;
+    // Older history arrived above the reader: keep the same text in view instead of jumping.
+    const prepended =
+      first !== undefined && firstSequence.current !== undefined && first < firstSequence.current;
+    if (follow.current) element.scrollTo({ top: events.length ? element.scrollHeight : 0 });
+    else if (prepended) element.scrollTop += element.scrollHeight - lastHeight.current;
+    firstSequence.current = first;
+    lastHeight.current = element.scrollHeight;
   }, [events]);
   useEffect(() => {
     follow.current = true;
+    firstSequence.current = undefined;
     setCollapsed(new Set());
+    setActiveTurn('');
   }, [session.id]);
+  const questions = turns.filter((turn) => turn.prompt.trim());
+  // Marks the question whose step is at the top of the viewport.
+  const trackActive = () => {
+    const element = scroll.current;
+    if (!element) return;
+    const top = element.getBoundingClientRect().top + 24;
+    let current = '';
+    for (const step of element.querySelectorAll<HTMLElement>('[data-turn-id]')) {
+      if (step.getBoundingClientRect().top <= top) current = step.dataset.turnId ?? current;
+      else break;
+    }
+    setActiveTurn(current || questions[0]?.id || '');
+  };
+  const jumpTo = (id: string) => {
+    follow.current = false;
+    // A collapsed or filtered-out question must become visible before scrolling to it.
+    setCollapsed((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    if (!visibleTurns.some((turn) => turn.id === id)) {
+      setFilter('all');
+      setQuery('');
+    }
+    requestAnimationFrame(() => {
+      scroll.current
+        ?.querySelector(`[data-turn-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      setActiveTurn(id);
+    });
+  };
   const toggle = (id: string) =>
     setCollapsed((current) => {
       const next = new Set(current);
@@ -192,14 +243,13 @@ export function Timeline({
           const element = scroll.current;
           if (element)
             follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+          trackActive();
         }}
       >
         <ol className="stepper">
-          {events.length >= 300 && (
-            <li className="stepper-more">
-              <button className="text-button" onClick={loadOlder}>
-                Загрузить предыдущие события
-              </button>
+          {historyLoading && (
+            <li className="stepper-more" role="status">
+              <ThinkingIndicator label="Загружаем раннюю историю чата…" />
             </li>
           )}
           {overview && !turns.length && (
@@ -244,6 +294,7 @@ export function Timeline({
               chooseAnotherAccount={chooseAnotherAccount}
               manageUsage={manageUsage}
               last={turn.id === turns[turns.length - 1]?.id}
+              changes={running ? undefined : changes}
             />
           ))}
           {overview && (running || interrupted) && (
@@ -294,6 +345,22 @@ export function Timeline({
           )}
         </ol>
       </div>
+      {questions.length > 1 && (
+        <nav className="question-nav" aria-label="Переход к вопросам">
+          {questions.map((turn, index) => (
+            <button
+              key={turn.id}
+              className={turn.id === activeTurn ? 'active' : ''}
+              aria-current={turn.id === activeTurn ? 'true' : undefined}
+              aria-label={`Вопрос ${index + 1}: ${turn.prompt.slice(0, 120)}`}
+              onClick={() => jumpTo(turn.id)}
+            >
+              <span className="question-nav-label">{turn.prompt}</span>
+              <i aria-hidden="true" />
+            </button>
+          ))}
+        </nav>
+      )}
     </>
   );
 }
@@ -305,6 +372,7 @@ function Step({
   time,
   open = true,
   toggle,
+  anchor,
   children,
 }: {
   state: StepState;
@@ -313,11 +381,13 @@ function Step({
   time: number;
   open?: boolean;
   toggle?: () => void;
+  /** Turn id used by the question navigation to find this step. */
+  anchor?: string;
   children?: ReactNode;
 }) {
   const Icon = stepIcons[state];
   return (
-    <li className={`step step-${state}`}>
+    <li className={`step step-${state}`} data-turn-id={anchor}>
       <span className="step-marker" aria-hidden="true">
         <Icon size={15} className={state === 'running' ? 'spin' : undefined} />
       </span>
@@ -365,6 +435,7 @@ function TurnStep({
   chooseAnotherAccount,
   manageUsage,
   last,
+  changes,
 }: {
   turn: TimelineTurn;
   filter: TimelineFilter;
@@ -381,6 +452,7 @@ function TurnStep({
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
   last: boolean;
+  changes?: ChangeSource;
 }) {
   const state: StepState = turn.status === 'running' && interrupted ? 'interrupted' : turn.status;
   const elapsed = turn.finishedAt ? ` · ${duration(turn.finishedAt - turn.startedAt)}` : '';
@@ -401,6 +473,7 @@ function TurnStep({
       time={turn.startedAt}
       open={open}
       toggle={toggle}
+      anchor={turn.id}
     >
       {filter === 'all' && turn.prompt && (
         <div className="step-message">
@@ -523,6 +596,9 @@ function TurnStep({
             </div>
           </div>
         </div>
+      )}
+      {last && changes && turn.status !== 'running' && filter !== 'tools' && (
+        <RunChanges source={changes} refreshKey={`${turn.id}:${turn.finishedAt ?? ''}`} />
       )}
       {turn.error && turn.errorKind === 'usage_limit' ? (
         <div role="alert" className="limit-notice">

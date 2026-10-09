@@ -78,7 +78,7 @@ export function SubscriptionLimits({
                         : 'ChatGPT'}
                   </span>
                 </div>
-                {s?.state === 'signed_in' && !error ? (
+                {s?.state === 'signed_in' ? (
                   <>
                     {s.usage.map((w, i) => {
                       const remaining = Math.round(
@@ -116,6 +116,15 @@ export function SubscriptionLimits({
                       </details>
                     )}
                     {s.limit_reached && <span className="field-error">Лимит исчерпан</span>}
+                    {error && (
+                      <span className="limit-note limit-stale" title={error}>
+                        Не удалось обновить · данные на{' '}
+                        {new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
                     <button
                       className="text-button limit-manage"
                       onClick={() => openUsage(a.provider)}

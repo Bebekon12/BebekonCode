@@ -284,6 +284,14 @@ fn cancel_session(session_id: String, state: State<'_, AppState>) -> IpcResult<(
         .map_err(|error| error.to_string())
 }
 #[tauri::command]
+async fn delete_chat(session_id: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state
+        .core
+        .delete_chat(&session_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
 async fn session_events(
     session_id: String,
     before: Option<i64>,
@@ -610,6 +618,7 @@ fn main() {
             handoff_session,
             send_message,
             cancel_session,
+            delete_chat,
             session_events,
             refresh_providers,
             add_account,

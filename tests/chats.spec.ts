@@ -1,5 +1,32 @@
 import { test, expect } from '@playwright/test';
 
+test('full access requires confirmation and can be returned to a restricted mode', async ({
+  page,
+}) => {
+  await page.goto('/?preview=1');
+  await page.locator('.new-session-button').click();
+  await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
+  const access = page.getByLabel('Доступ в чате');
+  await expect(access).toContainText('По правилам провайдера');
+  await access.click();
+  await page.getByRole('button', { name: /Полный доступ.*Без песочницы/ }).click();
+  const confirmation = page.getByRole('alertdialog', { name: 'Полный доступ', exact: true });
+  await expect(confirmation).toContainText('может повредить данные вне проекта');
+  await expect(access).toContainText('По правилам провайдера');
+  await confirmation.getByRole('button', { name: 'Отмена', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(access).toContainText('По правилам провайдера');
+  await access.click();
+  await page.getByRole('button', { name: /Полный доступ.*Без песочницы/ }).click();
+  await confirmation.getByRole('button', { name: 'Включить полный доступ', exact: true }).click();
+  await expect(access).toContainText('Полный доступ');
+  await expect(access).toHaveClass(/access-danger/);
+  await access.click();
+  await page.getByRole('button', { name: /Только чтение.*Изучать/ }).click();
+  await expect(access).toContainText('Только чтение');
+  await expect(access).not.toHaveClass(/access-danger/);
+});
+
 test('create an ordinary chat without a project and change its access and tools', async ({
   page,
 }) => {

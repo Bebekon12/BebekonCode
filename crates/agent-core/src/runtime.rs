@@ -172,10 +172,7 @@ impl Core {
             .ok_or_else(|| {
                 CoreError::Invalid("Аккаунт не относится к выбранному провайдеру".into())
             })?;
-        if !["standard", "read_only", "workspace_auto"].contains(&input.permission_profile.as_str())
-        {
-            return Err(CoreError::Invalid("Неизвестный профиль разрешений".into()));
-        }
+        crate::permissions::validate_profile(&input.provider, &input.permission_profile)?;
         // Model availability comes from the provider for this specific account.
         if !provider
             .models(&account)

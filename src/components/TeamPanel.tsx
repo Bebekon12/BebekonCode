@@ -87,7 +87,9 @@ export function TeamPanel({
                       ? 'Анализирует проект · только чтение'
                       : member.permission_profile === 'workspace_auto'
                         ? 'Изменяет проект · автоправки'
-                        : 'Изменяет проект · с подтверждениями'}
+                        : member.permission_profile === 'full_access'
+                          ? 'Полный доступ · без песочницы и подтверждений'
+                          : 'Изменяет проект · с подтверждениями'}
                 </small>
               </div>
               <button

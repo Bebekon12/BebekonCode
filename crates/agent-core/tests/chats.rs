@@ -453,6 +453,65 @@ async fn team_exchanges_results_and_cancellation_stops_all_workers() {
 }
 
 #[tokio::test]
+async fn deleting_a_chat_removes_members_and_history_but_never_a_running_chat() {
+    let (_dir, core, probe, other) = fixture().await;
+    let chat = core
+        .create_chat(CreateChat {
+            workspace_id: None,
+            mode: "team".into(),
+            agents: vec![config("mock", "mock-local"), config("other", &other)],
+        })
+        .await
+        .unwrap();
+    core.send_message(&chat.id, "review widget".into())
+        .await
+        .unwrap();
+    settle(&core, &chat.id).await;
+    let children: Vec<_> = core
+        .snapshot()
+        .await
+        .unwrap()
+        .sessions
+        .into_iter()
+        .filter(|s| s.parent_session_id.as_deref() == Some(chat.id.as_str()))
+        .collect();
+    assert!(!children.is_empty());
+    assert!(
+        core.delete_chat(&children[0].id).await.is_err(),
+        "a member is deleted only with its chat"
+    );
+    core.send_message(&chat.id, "cancel task".into())
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while probe.active.load(Ordering::SeqCst) < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        core.delete_chat(&chat.id).await.is_err(),
+        "a running chat must be stopped first"
+    );
+    core.cancel(&chat.id).unwrap();
+    settle(&core, &chat.id).await;
+    // The run releases its lease right after recording the stopped status.
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while core.delete_chat(&chat.id).await.is_err() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let sessions = core.snapshot().await.unwrap().sessions;
+    assert!(!sessions
+        .iter()
+        .any(|s| s.id == chat.id || s.parent_session_id.as_deref() == Some(chat.id.as_str())));
+    assert!(core.storage.events(&chat.id, None).await.is_err());
+}
+
+#[tokio::test]
 async fn worker_error_event_is_not_replaced_with_success_or_another_account() {
     let (_dir, core, probe, other) = fixture().await;
     let chat = core

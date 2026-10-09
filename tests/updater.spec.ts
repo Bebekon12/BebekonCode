@@ -22,7 +22,8 @@ async function updaterFixture(page: Page, current = false) {
     },
     { current },
   );
-  await page.route('**/src/preview.ts', async (route) => {
+  // Vite may append a `?t=` timestamp to the module URL.
+  await page.route('**/src/preview.ts*', async (route) => {
     const response = await route.fetch();
     const body = await response.text();
     expect(body).toContain('checkUpdate: async () => {');

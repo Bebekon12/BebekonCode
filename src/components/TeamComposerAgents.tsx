@@ -45,13 +45,15 @@ export function TeamComposerAgents({
               </small>
             </span>
             <span
-              className="agent-access"
+              className={`agent-access ${a.permission_profile === 'full_access' ? 'access-danger' : ''}`}
               title={
                 a.permission_profile === 'read_only'
                   ? 'Только чтение'
                   : a.permission_profile === 'workspace_auto'
                     ? 'Авто в проекте · дополнительный доступ требует подтверждения'
-                    : 'Доступ по правилам провайдера'
+                    : a.permission_profile === 'full_access'
+                      ? 'Полный доступ · без песочницы и подтверждений'
+                      : 'Доступ по правилам провайдера'
               }
             >
               <ShieldCheck size={12} />
@@ -59,7 +61,9 @@ export function TeamComposerAgents({
                 ? 'Чтение'
                 : a.permission_profile === 'workspace_auto'
                   ? 'Авто'
-                  : 'По правилам'}
+                  : a.permission_profile === 'full_access'
+                    ? 'Полный'
+                    : 'По правилам'}
             </span>
             <Settings2 size={13} />
           </button>

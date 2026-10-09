@@ -31,7 +31,12 @@ test('document and table comments survive reopening and can be resolved or discu
   await page.screenshot({ path: 'test-results/table-review.png' });
   // A long discussion is bounded explicitly, rather than silently losing comments.
   await page.evaluate(async () => {
-    const modulePath = '/src/preview.ts';
+    // Import the instance the app already loaded; Vite may add a `?t=` timestamp to its URL.
+    const modulePath =
+      performance
+        .getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .find((name) => /\/src\/preview\.ts(\?|$)/.test(name)) ?? '/src/preview.ts';
     const { preview } = (await import(modulePath)) as typeof import('../src/preview');
     const workspace = (await preview.snapshot()).workspaces.find((w) => w.id !== 'chat-scratch')!;
     for (let i = 0; i < 2; i++)

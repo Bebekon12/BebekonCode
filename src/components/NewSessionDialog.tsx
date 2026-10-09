@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { MessageSquare, Network, Layers, Plus, X, ChevronDown, Settings2 } from 'lucide-react';
 import type { AgentConfig, ClientTransport, CreateChat, Snapshot } from '../contracts';
 import type { AccountState } from '../accounts';
-import { defaultAgent, modeLabels } from '../chat';
+import { defaultAgent, defaultTeam, modeLabels, teamPartner } from '../chat';
 import { AgentPicker } from './AgentPicker';
 import { Dialog } from './Dialog';
 
@@ -31,12 +31,7 @@ export function NewSession({
   const [mode, setMode] = useState<CreateChat['mode']>(initialMode);
   const [project, setProject] = useState(initialProject === 'chat-scratch' ? '' : initialProject);
   const [agents, setAgents] = useState<AgentConfig[]>(() =>
-    initialMode === 'team'
-      ? [
-          defaultAgent(data),
-          { ...defaultAgent(data), role: 'Рецензент', permission_profile: 'read_only' },
-        ]
-      : [defaultAgent(data)],
+    initialMode === 'team' ? defaultTeam(data) : [defaultAgent(data)],
   );
   const valid = agents.every(
     (a) =>
@@ -51,10 +46,11 @@ export function NewSession({
     setExpanded(0);
     setMode(next);
     if (next === 'single') setAgents((current) => current.slice(0, 1));
+    // Keep the agent the user already configured; add a partner from the other provider.
     else if (next === 'team' && agents.length === 1)
       setAgents((current) => [
         ...current,
-        { ...defaultAgent(data), role: 'Рецензент', permission_profile: 'read_only' },
+        ...current.slice(0, 1).map((first) => teamPartner(data, first)),
       ]);
   };
   return (
@@ -149,11 +145,9 @@ export function NewSession({
         </div>
         {mode !== 'single' && (
           <p className="small muted">
-            До двух подзадач параллельно. Участники читают проект; основной агент проверяет
-            результаты и вносит изменения.{' '}
             {mode === 'auto'
-              ? 'Каждый запрос создаёт до четырёх контекстов.'
-              : 'Команда проводит один раунд взаимного обсуждения.'}
+              ? 'Подзадачи анализируют проект только на чтение, до двух параллельно; основной агент проверяет результаты и вносит изменения. Каждый запрос создаёт до четырёх контекстов.'
+              : 'Участники работают с выбранным доступом: с правом записи — по очереди, только на чтение — до двух параллельно. При двух и более участниках проходит раунд взаимной проверки на чтение; при одном его результат проверяет основной агент.'}
           </p>
         )}
         {mode !== 'single' && agents.length < 3 && (

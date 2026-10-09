@@ -237,6 +237,8 @@ export interface ClientTransport {
   handoff(sessionId: string, config: AgentConfig): Promise<string>;
   sendMessage(sessionId: string, prompt: string, attachments?: Attachment[]): Promise<string>;
   cancel(sessionId: string): Promise<void>;
+  /** Deletes a stopped top-level chat with its members and local history; project files stay. */
+  deleteChat(sessionId: string): Promise<void>;
   events(sessionId: string, before?: number): Promise<AgentEvent[]>;
   subscribe(onEvent: (event: AgentEvent) => void, onResync: () => void): Promise<() => void>;
   refreshProviders(): Promise<ProviderInfo[]>;

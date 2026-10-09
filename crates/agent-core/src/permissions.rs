@@ -22,11 +22,25 @@ pub enum Action {
     SystemSettings,
 }
 
+/// Access profiles a chat may use. Full access is opt-in per chat and only where the provider
+/// documents it (Codex `dangerFullAccess`); Claude keeps its guarded modes.
+pub fn validate_profile(provider: &str, profile: &str) -> Result<()> {
+    match profile {
+        "standard" | "read_only" | "workspace_auto" => Ok(()),
+        "full_access" if matches!(provider, "openai" | "mock") => Ok(()),
+        "full_access" => Err(CoreError::Invalid(
+            "Полный доступ доступен только для Codex (ChatGPT)".into(),
+        )),
+        _ => Err(CoreError::Invalid("Неизвестный профиль доступа".into())),
+    }
+}
+
 pub fn evaluate(profile: &str, action: Action) -> Decision {
     use Action::*;
     use Decision::*;
     match (profile, action) {
         (_, Credentials | SystemSettings) => Deny,
+        ("full_access", _) => Allow,
         ("read_only", ReadWorkspace | GitRead) => Allow,
         ("read_only", _) => Deny,
         ("standard" | "workspace_auto", ReadWorkspace | WriteWorkspace | GitRead) => Allow,
@@ -59,6 +73,15 @@ mod tests {
             evaluate("read_only", Action::WriteWorkspace),
             Decision::Deny
         );
+        assert_eq!(evaluate("full_access", Action::GitPush), Decision::Allow);
+        assert_eq!(evaluate("full_access", Action::Credentials), Decision::Deny);
+    }
+    #[test]
+    fn full_access_is_codex_only() {
+        assert!(validate_profile("openai", "full_access").is_ok());
+        assert!(validate_profile("anthropic", "full_access").is_err());
+        assert!(validate_profile("anthropic", "workspace_auto").is_ok());
+        assert!(validate_profile("openai", "everything").is_err());
     }
     #[test]
     fn sibling_prefix_does_not_escape() {

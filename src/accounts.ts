@@ -23,6 +23,8 @@ export function useAccountState(
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [signingIn, setSigningIn] = useState<Record<string, boolean>>({});
   const requested = useRef(new Set<string>());
+  // Accounts whose last status refresh failed; a later quota update supersedes only that error.
+  const refreshFailed = useRef(new Set<string>());
   const changed = useRef(onAccountsChanged);
   changed.current = onAccountsChanged;
 
@@ -31,9 +33,11 @@ export function useAccountState(
       if (!client) return;
       try {
         const status = await client.accountStatus(accountId);
+        refreshFailed.current.delete(accountId);
         setStatuses((current) => ({ ...current, [accountId]: status }));
         setErrors(({ [accountId]: _removed, ...rest }) => rest);
       } catch (error) {
+        refreshFailed.current.add(accountId);
         setErrors((current) => ({ ...current, [accountId]: errorText(error) }));
       }
     },
@@ -65,6 +69,7 @@ export function useAccountState(
       .subscribeAccounts((event) => {
         if (event.kind === 'usage' && event.status) {
           const update = event.status;
+          const fresh = update.usage.length > 0;
           setStatuses((current) => {
             const previous = current[event.account_id];
             if (!previous) return current;
@@ -72,14 +77,17 @@ export function useAccountState(
               ...current,
               [event.account_id]: {
                 ...previous,
-                usage: update.usage.length ? update.usage : previous.usage,
+                usage: fresh ? update.usage : previous.usage,
                 plan: previous.plan ?? update.plan,
                 limit_reached: update.limit_reached,
-                checked_at: update.checked_at,
+                // An empty update must not make old percentages look freshly checked.
+                checked_at: fresh ? update.checked_at : previous.checked_at,
                 usage_detail: update.usage_detail ?? previous.usage_detail,
               },
             };
           });
+          if (fresh && refreshFailed.current.delete(event.account_id))
+            setErrors(({ [event.account_id]: _removed, ...rest }) => rest);
           return;
         }
         if (event.kind === 'notice' && event.message) {

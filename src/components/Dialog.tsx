@@ -1,5 +1,9 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+
+// Open dialogs, innermost last: only the top one reacts to Escape and Tab.
+const openDialogs: symbol[] = [];
+
 export function Dialog({
   title,
   close,
@@ -18,7 +22,11 @@ export function Dialog({
   const titleId = useId();
   const closeRef = useRef(close);
   closeRef.current = close;
+  const lockedRef = useRef(closeDisabled);
+  lockedRef.current = closeDisabled;
   useEffect(() => {
+    const token = Symbol('dialog');
+    openDialogs.push(token);
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const element = ref.current;
     const focusable = () =>
@@ -27,17 +35,25 @@ export function Dialog({
           'button:not(:disabled), input, select, textarea, a[href], [tabindex="0"]',
         ) ?? []),
       ].filter((item) => !item.hasAttribute('disabled') && item.getClientRects().length > 0);
-    focusable()[0]?.focus();
+    // Respect a field that already took focus via autoFocus (search, confirmation buttons).
+    if (!element?.contains(document.activeElement)) {
+      const items = focusable();
+      (items.find((item) => !item.closest('.dialog-heading')) ?? items[0])?.focus();
+    }
     const key = (event: KeyboardEvent) => {
+      if (openDialogs.at(-1) !== token) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        closeRef.current();
+        if (!lockedRef.current) closeRef.current();
       }
       if (event.key === 'Tab') {
         const items = focusable();
         const first = items[0];
         const last = items.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
+        if (!element?.contains(document.activeElement)) {
+          event.preventDefault();
+          first?.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
           last?.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -49,6 +65,7 @@ export function Dialog({
     document.addEventListener('keydown', key);
     return () => {
       document.removeEventListener('keydown', key);
+      openDialogs.splice(openDialogs.indexOf(token), 1);
       previous?.focus();
     };
   }, []);
@@ -56,7 +73,7 @@ export function Dialog({
     <div
       className="dialog-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
+        if (event.target === event.currentTarget && !closeDisabled) close();
       }}
     >
       <div

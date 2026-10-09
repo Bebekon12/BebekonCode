@@ -42,14 +42,23 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   const root = wizard.locator('.chat-agent-card').nth(0);
   const worker = wizard.locator('.chat-agent-card').nth(1);
   await root.getByLabel('Провайдер', { exact: true }).selectOption('anthropic');
+  await expect(
+    root.getByLabel('Доступ', { exact: true }).locator('option[value="full_access"]'),
+  ).toHaveAttribute('disabled', '');
   await expect(root.getByLabel('Модель', { exact: true })).toHaveValue('sonnet');
   await root.getByLabel('Модель', { exact: true }).selectOption('opus');
   await root.getByLabel('Уровень обдумывания', { exact: true }).fill('3');
   await worker.locator('.agent-card-toggle').click();
   await worker.getByLabel('Провайдер', { exact: true }).selectOption('openai');
   await expect(worker.getByLabel('Модель', { exact: true })).toHaveValue('preview-model');
-  await expect(worker.getByLabel('Доступ', { exact: true })).toHaveValue('read_only');
+  // Default team members keep the provider's standard access; full access is never preselected.
+  await expect(worker.getByLabel('Доступ', { exact: true })).toHaveValue('standard');
   await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
+  await page.getByLabel('Доступ в чате').click();
+  await expect(
+    page.getByRole('button', { name: /Полный доступ.*Недоступно для Claude/ }),
+  ).toBeDisabled();
+  await page.keyboard.press('Escape');
   await expect(page.locator('.composer-agent')).toHaveCount(2);
   await expect(page.locator('.composer-team')).toContainText('preview-model');
   await page.locator('.composer-agent').first().click();

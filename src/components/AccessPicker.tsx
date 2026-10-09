@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Eye, ShieldCheck, ShieldQuestion } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, Eye, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 
 export const accessOptions = [
   {
@@ -22,29 +22,66 @@ export const accessOptions = [
       'Правки в проекте автоматически. Codex также выполняет команды в песочнице. Дополнительный доступ требует подтверждения.',
     Icon: ShieldCheck,
   },
+  {
+    id: 'full_access',
+    label: 'Полный доступ',
+    description:
+      'Без песочницы и без подтверждений: сеть, любые файлы и команды на этом компьютере. Только для Codex, включается для этого чата.',
+    Icon: ShieldAlert,
+  },
 ] as const;
+
+/** Providers whose official CLI documents a full-access mode used by the core. */
+export const fullAccessProviders = ['openai', 'mock'];
+
+export const fullAccessWarning =
+  'Агент сможет без вопросов читать и изменять любые файлы, запускать любые команды и выходить в сеть от вашего имени. Ошибка агента может повредить данные вне проекта. Включайте только для задач, которым доверяете, и возвращайте обычный режим после работы.';
 
 export function AccessPicker({
   value,
   change,
+  provider,
   disabled = false,
 }: {
   value: string;
   change: (value: string) => void;
+  provider: string;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [maxHeight, setMaxHeight] = useState<number>();
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const active = accessOptions.find((option) => option.id === value) ?? accessOptions[1];
-  useEffect(() => {
+  const fullAvailable = fullAccessProviders.includes(provider);
+  // The popover opens upward: fit it into the space above the trigger, minus its 12px gap.
+  useLayoutEffect(() => {
     if (!open) return;
+    const fit = () => {
+      const top = trigger.current?.getBoundingClientRect().top ?? window.innerHeight;
+      setMaxHeight(Math.max(160, Math.floor(top - 12 - 8)));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open]);
+  useEffect(() => {
+    if (!open) {
+      setConfirming(false);
+      return;
+    }
     const outside = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
+  const choose = (id: string) => {
+    change(id);
+    setOpen(false);
+    trigger.current?.focus();
+  };
   return (
     <div
       className="access-picker"
@@ -58,7 +95,7 @@ export function AccessPicker({
       }}
     >
       <button
-        className="model-trigger"
+        className={`model-trigger ${value === 'full_access' ? 'access-danger' : ''}`}
         ref={trigger}
         type="button"
         aria-label="Доступ в чате"
@@ -71,32 +108,68 @@ export function AccessPicker({
         <ChevronDown size={13} />
       </button>
       {open && (
-        <div className="access-popover" aria-label="Уровни доступа">
-          <div className="access-popover-title">Что разрешено агенту?</div>
-          {accessOptions.map(({ id, label, description, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={id === value}
-              disabled={disabled}
-              onClick={() => {
-                change(id);
-                setOpen(false);
-                trigger.current?.focus();
-              }}
-            >
-              <Icon size={20} />
-              <span>
-                <strong>{label}</strong>
-                <small>{description}</small>
-              </span>
-              {id === value && <Check size={17} />}
-            </button>
-          ))}
-          <p>
-            Доступ за пределы песочницы требует отдельного подтверждения. В режиме чтения он
-            запрещён.
-          </p>
+        <div className="access-popover" aria-label="Уровни доступа" style={{ maxHeight }}>
+          {confirming ? (
+            <div className="full-access-confirm" role="alertdialog" aria-label="Полный доступ">
+              <strong>
+                <ShieldAlert size={18} /> Включить полный доступ для этого чата?
+              </strong>
+              <p>{fullAccessWarning}</p>
+              <div className="dialog-footer">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  autoFocus
+                  onClick={() => {
+                    setConfirming(false);
+                    trigger.current?.focus();
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="primary-button danger-solid"
+                  onClick={() => choose('full_access')}
+                >
+                  Включить полный доступ
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="access-popover-title">Что разрешено агенту?</div>
+              {accessOptions.map(({ id, label, description, Icon }) => {
+                const full = id === 'full_access';
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={full ? 'access-danger' : undefined}
+                    aria-pressed={id === value}
+                    disabled={disabled || (full && !fullAvailable)}
+                    onClick={() => (full && id !== value ? setConfirming(true) : choose(id))}
+                  >
+                    <Icon size={20} />
+                    <span>
+                      <strong>{label}</strong>
+                      <small>
+                        {full && !fullAvailable
+                          ? 'Недоступно для Claude: приложение сохраняет защитный слой Claude Code.'
+                          : description}
+                      </small>
+                    </span>
+                    {id === value && <Check size={17} />}
+                  </button>
+                );
+              })}
+              <p>
+                {value === 'full_access'
+                  ? 'Сейчас песочница и подтверждения отключены для этого чата.'
+                  : 'Доступ за пределы песочницы требует отдельного подтверждения. В режиме чтения он запрещён.'}
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>

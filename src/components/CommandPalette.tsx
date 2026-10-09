@@ -31,6 +31,7 @@ export function CommandPalette({
       action: () => select(session),
     })),
   ];
+  // Enter runs the first match; it is highlighted so the result is predictable.
   const matches = all.filter((command) => fuzzyMatch(query, command.label));
   return (
     <Dialog title="Команды" close={close}>
@@ -50,7 +51,11 @@ export function CommandPalette({
       </div>
       <div className="palette-list">
         {matches.map((command, index) => (
-          <button key={`${command.label}-${index}`} onClick={() => run(command.action)}>
+          <button
+            key={`${command.label}-${index}`}
+            className={query.trim() && index === 0 ? 'suggested' : undefined}
+            onClick={() => run(command.action)}
+          >
             {command.icon}
             <span>{command.label}</span>
             <ChevronRight size={14} />

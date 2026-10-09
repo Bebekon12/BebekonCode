@@ -54,6 +54,7 @@ export function ChatControls({
         )}
         <AccessPicker
           value={session.permission_profile}
+          provider={session.provider}
           disabled={disabled}
           change={(permission_profile) =>
             configure({ ...sessionConfig(session), permission_profile })

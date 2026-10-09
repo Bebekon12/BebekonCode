@@ -41,10 +41,13 @@ export interface TimelineTurn {
   approvals: TimelineApproval[];
 }
 export type TimelineFilter = 'all' | 'agent' | 'tools';
+/** Events per page returned by the core (`Storage::events`); a full page means more remain. */
+export const historyPageSize = 300;
+// The whole stored history stays in view: trimming here used to drop early turns.
 export function mergeEvents(current: AgentEvent[], incoming: AgentEvent[]): AgentEvent[] {
   const events = new Map(current.map((event) => [event.sequence, event]));
   incoming.forEach((event) => events.set(event.sequence, event));
-  return [...events.values()].sort((a, b) => a.sequence - b.sequence).slice(-600);
+  return [...events.values()].sort((a, b) => a.sequence - b.sequence);
 }
 export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
   const turns = new Map<string, TimelineTurn>();

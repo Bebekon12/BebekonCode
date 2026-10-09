@@ -10,6 +10,7 @@ import type {
 } from '../contracts';
 import { accountLabel, errorText } from '../locale';
 import { ReasoningSlider } from './ModelPicker';
+import { fullAccessProviders, fullAccessWarning } from './AccessPicker';
 
 export function AgentPicker({
   client,
@@ -122,6 +123,11 @@ export function AgentPicker({
                   model: '',
                   reasoning_effort: null,
                   tools: {},
+                  // Full access exists only for some providers; never carry it over silently.
+                  permission_profile:
+                    value.permission_profile === 'full_access'
+                      ? 'standard'
+                      : value.permission_profile,
                 });
               }}
             >
@@ -198,14 +204,23 @@ export function AgentPicker({
             <option value="standard">По правилам провайдера</option>
             <option value="workspace_auto">Авто в проекте</option>
             <option value="read_only">Только чтение</option>
+            <option value="full_access" disabled={!fullAccessProviders.includes(value.provider)}>
+              Полный доступ{fullAccessProviders.includes(value.provider) ? '' : ' — только Codex'}
+            </option>
           </select>
-          <small className="muted">
-            {value.permission_profile === 'workspace_auto'
-              ? 'Правки файлов проекта без повторных вопросов. Запросы дополнительных разрешений остаются видимыми.'
-              : worker
-                ? 'Участники с правом записи работают по очереди, чтобы не перезаписывать изменения друг друга.'
-                : 'Доступ ограничен выбранным проектом.'}
-          </small>
+          {value.permission_profile === 'full_access' ? (
+            <small className="full-access-note" role="alert">
+              {fullAccessWarning}
+            </small>
+          ) : (
+            <small className="muted">
+              {value.permission_profile === 'workspace_auto'
+                ? 'Правки файлов проекта без повторных вопросов. Запросы дополнительных разрешений остаются видимыми.'
+                : worker
+                  ? 'Участники с правом записи работают по очереди, чтобы не перезаписывать изменения друг друга.'
+                  : 'Доступ ограничен выбранным проектом.'}
+            </small>
+          )}
         </label>
         <label className="field">
           Роль

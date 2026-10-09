@@ -1,6 +1,6 @@
 # Provider compliance
 
-Official documentation last checked: **2026-10-08**. This records technical integration research
+Official documentation last checked: **2026-10-09**. This records technical integration research
 and the resulting design. It is not a claim of provider approval or a legal audit.
 
 Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
@@ -25,7 +25,7 @@ with a null payload and `ready`, `notConfigured`, `updateRequired` responses.
 - `workspace-write` plus `on-request` already is Codex's documented Auto preset. Both `standard`
   and `workspace_auto` retain that policy for Codex; UI states that confirming every individual
   Codex edit is unavailable. Retired `untrusted`/`unlessTrusted` settings are not introduced.
-- On Windows, readiness is checked before every Codex turn (including read-only workers). A
+- On Windows, readiness is checked before every sandboxed Codex turn (including read-only workers). A
   missing, outdated or unknown sandbox stops the turn before inference with recovery instructions,
   instead of relying on a series of shell escalation prompts. Readiness is also shown per account.
 - Only clicking the account's setup button invokes `windowsSandbox/setupStart` in `elevated`
@@ -44,7 +44,8 @@ with a null payload and `ready`, `notConfigured`, `updateRequired` responses.
 - Read-only runs decline escalation and file-change approval requests with a visible explanation;
   the reviewer cannot gain write access by accepting a prompt during a read-only review round.
 - No command-text heuristic, automatic acceptance of server requests, authentication workaround,
-  disabled sandbox, global permission grant or modification of another app's profile is used.
+  global permission grant or modification of another app's profile is used. The explicit per-chat
+  full-access exception in 0.8.2 is described below.
 - Claude's file hook retains the original Windows root spelling when reducing absolute paths
   to relative paths (including short-path aliases). The suffix still goes through the canonical
   root, credential-path denial and existing reparse-point/traversal checks. Reference rechecked:
@@ -55,6 +56,30 @@ Validation includes simulated RPC setup completion/failure/busy cases and unsupp
 approval responses, plus the real CLI's readiness query in a fresh isolated profile without
 inference. Real administrator-approved setup and authenticated model command execution require
 the user's own interactive Windows session and remain unverified by the automated release checks.
+
+## Full access and local computer use (0.8.2, owner decision 2026-10-09)
+
+The repository owner approved changing the default-only safeguard rule in AGENTS.md. References
+were checked by the team reviewer on 2026-10-09: [Codex permissions](https://developers.openai.com/codex/permissions/),
+[app-server reference](https://learn.chatgpt.com/docs/app-server), [local MCP over stdio](https://learn.chatgpt.com/docs/extend/mcp)
+and [ChatGPT-plan preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations/).
+
+- `full_access` is a per-chat profile chosen manually after a red confirmation. It is never a
+  default and is validated in the Rust core: only Codex (and the local demo) accept it.
+- Codex receives `sandbox=danger-full-access` on `thread/start`/`thread/resume`,
+  `sandboxPolicy={"type":"dangerFullAccess"}` and `approvalPolicy=never` on every `turn/start`.
+  Windows sandbox readiness is not required in this mode. Switching back re-applies the restricted
+  policy on the next resume and turn.
+- Team review rounds and auto-mode workers are forced to `read_only` regardless of the member's
+  profile, so a reviewer never inherits full access. Credentials and system settings remain
+  prohibited by repository policy; unrestricted provider commands do not provide a filesystem
+  isolation guarantee for these paths.
+- Claude keeps its restricted mode, path hooks and deny rules; `full_access` is rejected for Claude
+  and shown as unavailable in the UI. Its adapter still blocks MCP tools.
+- Built-in Codex computer use and hosted tools are unavailable on the ChatGPT-plan route. A local
+  computer-use MCP server (stdio) is planned: screenshots, pointer and keyboard actions, each
+  confirmed by the user, with a visible indicator and stop control in every access mode. Not
+  implemented yet; see `docs/computer-use.md`.
 
 ## OpenAI / Codex (implemented in 0.3.0)
 
@@ -92,9 +117,10 @@ if Codex itself reports them (`account/rateLimits/updated`) and otherwise links 
 settings. No percentages are estimated.
 
 Not used on purpose: Codex's own built-in ChatGPT login (`account/login/start`), the
-`chatgptAuthTokens` mode marked "for OpenAI internal use only", importing or reading any
-`auth.json`, and `danger-full-access` sandboxing. Sandbox is `workspace-write` or `read-only`
-with `approvalPolicy=on-request`; every approval request is shown to the user.
+`chatgptAuthTokens` mode marked "for OpenAI internal use only", and importing or reading any
+`auth.json`. Sandbox is `workspace-write` or `read-only` with `approvalPolicy=on-request`, and
+every approval request is shown to the user, except in the explicit per-chat full access mode
+described in "Full access and local computer use" below.
 
 Protocol facts (methods, fields, error codes) were taken from the schema generated by the installed
 CLI (`codex app-server generate-json-schema`, codex-cli 0.160.1). The app-server protocol is marked
@@ -231,7 +257,8 @@ Rechecked [Codex app-server](https://learn.chatgpt.com/docs/app-server),
 - `workspace_auto` is an explicit per-agent choice. Claude uses documented `acceptEdits`,
   retaining restricted tools, path-checking hooks and deny rules. Only validated project file
   writes are accepted automatically. Codex retains `workspace-write` and `on-request`;
-  provider approval requests are always forwarded. No unrestricted or bypass mode is offered.
+  provider approval requests are always forwarded. (Superseded for Codex by the explicit
+  full access mode in 0.8.2; Claude still has no unrestricted or bypass mode.)
 - Team agents retain their selected access. Writers execute sequentially; read-only agents may
   run two at a time. The review round is read-only to avoid duplicate edits.
 - Display actual Claude model IDs from `system/init.model` and `result.modelUsage`. Aliases are

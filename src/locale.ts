@@ -35,8 +35,13 @@ export function duration(seconds: number): string {
   const hours = Math.floor(minutes / 60);
   return minutes % 60 ? `${hours} ч ${minutes % 60} мин` : `${hours} ч`;
 }
+const permissionLabels: Record<string, string> = {
+  read_only: 'Только чтение',
+  workspace_auto: 'Авто в проекте',
+  full_access: 'Полный доступ',
+};
 export const permissionLabel = (profile: string) =>
-  profile === 'read_only' ? 'Только чтение' : 'Стандартный';
+  permissionLabels[profile] ?? 'По правилам провайдера';
 export function counted(value: number, forms: readonly [string, string, string]): string {
   const lastTwo = Math.abs(value) % 100;
   const last = lastTwo % 10;

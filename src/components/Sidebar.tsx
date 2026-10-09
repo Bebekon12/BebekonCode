@@ -14,6 +14,7 @@ import {
   Puzzle,
   Search,
   Settings2,
+  Trash2,
   UsersRound,
 } from 'lucide-react';
 import type { CreateChat, Session, Snapshot, Workspace } from '../contracts';
@@ -49,6 +50,7 @@ export function Sidebar({
   preview,
   accountState,
   openUsage,
+  deleteChat,
 }: {
   data: Snapshot | null;
   workspace?: Workspace;
@@ -70,6 +72,8 @@ export function Sidebar({
   preview: boolean;
   accountState: AccountState;
   openUsage: (provider: string) => void;
+  /** Asks to delete a chat; the caller confirms first. */
+  deleteChat: (session: Session) => void;
 }) {
   const [projectStates, setProjectStates] = usePreference<Record<string, boolean>>(
     'project-folders',
@@ -86,21 +90,34 @@ export function Sidebar({
     const Icon =
       item.chat_mode === 'team' ? UsersRound : item.chat_mode === 'auto' ? Network : MessageSquare;
     return (
-      <button
-        className={`session-button recent-chat ${sessionId === item.id ? 'selected' : ''}`}
-        key={item.id}
-        onClick={() => selectSession(item)}
-        title={`${sessionTitle(item.title)} · ${chatGroups.find((group) => group.mode === item.chat_mode)?.label ?? 'Чат'}`}
-        aria-current={sessionId === item.id ? 'page' : undefined}
-      >
-        <Icon size={17} />
-        <span className="session-copy sidebar-label">
-          <span className="session-title">{sessionTitle(item.title)}</span>
-        </span>
-        {(item.status === 'running' || item.status === 'failed') && (
-          <span className={`status-dot ${item.status}`} />
+      <div className="chat-row" key={item.id}>
+        <button
+          className={`session-button recent-chat ${sessionId === item.id ? 'selected' : ''}`}
+          data-session-id={item.id}
+          onClick={() => selectSession(item)}
+          title={`${sessionTitle(item.title)} · ${chatGroups.find((group) => group.mode === item.chat_mode)?.label ?? 'Чат'}`}
+          aria-current={sessionId === item.id ? 'page' : undefined}
+        >
+          <Icon size={17} />
+          <span className="session-copy sidebar-label">
+            <span className="session-title">{sessionTitle(item.title)}</span>
+          </span>
+          {(item.status === 'running' || item.status === 'failed') && (
+            <span className={`status-dot ${item.status}`} />
+          )}
+        </button>
+        {!collapsed && (
+          <button
+            className="icon-button chat-delete"
+            aria-label="Удалить чат"
+            title={item.status === 'running' ? 'Сначала остановите выполнение' : 'Удалить чат'}
+            disabled={disabled || item.status === 'running'}
+            onClick={() => deleteChat(item)}
+          >
+            <Trash2 size={15} />
+          </button>
         )}
-      </button>
+      </div>
     );
   };
   return (

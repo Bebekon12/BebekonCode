@@ -37,6 +37,7 @@ export const desktop: ClientTransport = {
   sendMessage: (sessionId, prompt, attachments = []) =>
     invoke('send_message', { sessionId, prompt, attachments }),
   cancel: (sessionId) => invoke('cancel_session', { sessionId }),
+  deleteChat: (sessionId) => invoke('delete_chat', { sessionId }),
   events: (sessionId, before) => invoke('session_events', { sessionId, before: before ?? null }),
   subscribe: async (onEvent, onResync) => {
     const unlistenEvent = await listen<AgentEvent>('agent-event', (event) =>

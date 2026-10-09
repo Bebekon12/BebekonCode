@@ -31,6 +31,10 @@
   --danger: #f0a0a0;
   --danger-solid: #b73144;
   --shadow: #000;
+  /* Range controls look the same in both themes, so the light block does not override them. */
+  --range-fill: #3e85ef;
+  --range-thumb: #ffffff;
+  --range-thumb-border: #dddddd;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 18px;

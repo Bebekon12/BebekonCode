@@ -5,6 +5,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Save,
@@ -182,11 +183,11 @@ export function FileManager({
               Не сохранять {reviewDirty ? 'черновик комментария к файлу' : 'изменения в файле'} «
               {selected?.name}»?
             </span>
-            <button autoFocus className="button" onClick={() => setDecision(null)}>
+            <button autoFocus className="secondary-button" onClick={() => setDecision(null)}>
               Продолжить редактирование
             </button>
             <button
-              className="button danger"
+              className="secondary-button danger"
               onClick={() => {
                 const action = decision;
                 setDecision(null);
@@ -199,7 +200,7 @@ export function FileManager({
         )}
         <div className="file-toolbar">
           <button
-            className="button"
+            className="secondary-button"
             disabled={locked}
             onClick={() =>
               guard(() => {
@@ -212,7 +213,7 @@ export function FileManager({
             <Plus size={15} /> Новый файл
           </button>
           <button
-            className="button"
+            className="secondary-button"
             disabled={locked}
             onClick={() =>
               guard(() => {
@@ -225,14 +226,14 @@ export function FileManager({
             <FolderPlus size={15} /> Новая папка
           </button>
           <button
-            className="button"
+            className="secondary-button"
             disabled={locked}
             onClick={() => void perform(() => client.openProject(workspace.id, false))}
           >
             <FolderOpen size={15} /> Проводник
           </button>
           <button
-            className="button"
+            className="secondary-button"
             disabled={locked}
             onClick={() => void perform(() => client.openProject(workspace.id, true))}
           >
@@ -278,14 +279,14 @@ export function FileManager({
               </label>
             )}
             <button
-              className={`button ${operation === 'delete' ? 'danger' : 'primary'}`}
+              className={operation === 'delete' ? 'secondary-button danger' : 'primary-button'}
               disabled={locked || (operation !== 'delete' && !name.trim())}
             >
               {operation === 'delete' ? 'Удалить безвозвратно' : 'Подтвердить'}
             </button>
             <button
               type="button"
-              className="button"
+              className="secondary-button"
               disabled={locked}
               onClick={() => setOperation(null)}
             >
@@ -340,7 +341,8 @@ export function FileManager({
                   {!entry.blocked && (
                     <button
                       className="icon-button"
-                      aria-label={`Manage ${entry.name}`}
+                      aria-label={`Переименовать или переместить ${entry.name}`}
+                      title="Переименовать или переместить"
                       disabled={locked}
                       onClick={() =>
                         guard(() => {
@@ -351,7 +353,7 @@ export function FileManager({
                         })
                       }
                     >
-                      …
+                      <MoreHorizontal size={15} />
                     </button>
                   )}
                 </div>
@@ -373,7 +375,7 @@ export function FileManager({
                 {dirty ? ' *' : ''}
               </code>
               <button
-                className="button primary"
+                className="primary-button"
                 disabled={locked || !dirty || !editable || review}
                 onClick={() => void save()}
               >
@@ -383,12 +385,16 @@ export function FileManager({
             {selected && (
               <div className="file-editor-actions">
                 {!selected.directory && (
-                  <button className="button" disabled={locked} onClick={() => open(selected)}>
+                  <button
+                    className="secondary-button"
+                    disabled={locked}
+                    onClick={() => open(selected)}
+                  >
                     Перечитать с диска
                   </button>
                 )}
                 <button
-                  className="button"
+                  className="secondary-button"
                   disabled={locked}
                   onClick={() =>
                     guard(() => {
@@ -403,7 +409,7 @@ export function FileManager({
                   Переименовать / переместить
                 </button>
                 <button
-                  className="button danger"
+                  className="secondary-button danger"
                   disabled={locked}
                   onClick={() =>
                     guard(() => {

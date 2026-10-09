@@ -437,11 +437,8 @@ impl AgentProvider for ClaudeProvider {
         {
             return Err(failure("Расширения Claude в Windows недоступны", None));
         }
-        if !["standard", "read_only", "workspace_auto"]
-            .contains(&request.session.permission_profile.as_str())
-        {
-            return Err(CoreError::Invalid("Неизвестный доступ Claude".into()));
-        }
+        // Claude keeps its guarded modes; full access is validated as Codex-only before this.
+        crate::permissions::validate_profile("anthropic", &request.session.permission_profile)?;
         if !self.models(&request.account).await?.iter().any(|model| {
             model.id == request.session.model
                 && request

@@ -391,6 +391,7 @@ impl CodexProvider {
     ) -> Result<String> {
         let session = &request.session;
         let read_only = session.permission_profile == "read_only";
+        let full_access = session.permission_profile == "full_access";
         let policy: crate::model::ToolPolicy = serde_json::from_str(&session.tool_policy)?;
         let extensions = if policy.mcp_servers.is_some() || policy.skills.is_some() {
             Some(self.extensions(&request.account).await?)
@@ -419,8 +420,15 @@ impl CodexProvider {
         let common = json!({
             "cwd": plain_path(&session.working_directory),
             "model": session.model,
-            "approvalPolicy": "on-request",
-            "sandbox": if read_only { "read-only" } else { "workspace-write" },
+            // Full access is chosen explicitly per chat; resume re-applies the current mode.
+            "approvalPolicy": if full_access { "never" } else { "on-request" },
+            "sandbox": if read_only {
+                "read-only"
+            } else if full_access {
+                "danger-full-access"
+            } else {
+                "workspace-write"
+            },
             "config": config,
         });
         if let Some(thread) = &session.provider_session_id {
@@ -920,7 +928,10 @@ impl AgentProvider for CodexProvider {
             _ = cancel.cancelled() => return Ok(()),
             operation = server.operation.lock() => operation,
         };
-        sandbox::ensure_ready(&server).await?;
+        // Full access runs without the Windows sandbox, so its setup is not required.
+        if request.session.permission_profile != "full_access" {
+            sandbox::ensure_ready(&server).await?;
+        }
         let thread = self.open_thread(&server, &request, &events).await?;
         let mut incoming = server.peer.subscribe();
         if let Ok(mut active) = server.active.lock() {
@@ -1063,8 +1074,11 @@ impl CodexProvider {
         } else {
             None
         };
+        let full_access = request.session.permission_profile == "full_access";
         let sandbox = if request.session.permission_profile == "read_only" {
             json!({"type":"readOnly", "networkAccess":false})
+        } else if full_access {
+            json!({"type":"dangerFullAccess"})
         } else {
             json!({"type":"workspaceWrite", "writableRoots":[plain_path(&request.session.working_directory)], "networkAccess":false})
         };
@@ -1077,7 +1091,7 @@ impl CodexProvider {
                     "input": std::iter::once(json!({"type":"text", "text":request.prompt})).chain(request.attachments.iter().filter(|file| file.mime.starts_with("image/")).map(|file| json!({"type":"localImage", "path":file.path}))).collect::<Vec<_>>(),
                     "model": request.session.model,
                     "effort": effort,
-                    "approvalPolicy": "on-request",
+                    "approvalPolicy": if full_access { "never" } else { "on-request" },
                     "sandboxPolicy": sandbox,
                     "disabledPluginIds": disabled_plugins,
                     "outputSchema": request.output_schema,

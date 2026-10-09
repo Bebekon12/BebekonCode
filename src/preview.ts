@@ -349,6 +349,18 @@ export const preview: ClientTransport = {
   cancel: async (sessionId) => {
     cancelled.add(sessionId);
   },
+  deleteChat: async (sessionId) => {
+    const chat = state.sessions.find((session) => session.id === sessionId);
+    if (!chat || chat.parent_session_id) throw new Error('Удалить можно только чат целиком.');
+    const ids = new Set([sessionId]);
+    for (const session of state.sessions)
+      if (session.parent_session_id && ids.has(session.parent_session_id)) ids.add(session.id);
+    if (state.sessions.some((session) => ids.has(session.id) && session.status === 'running'))
+      throw new Error('Остановите выполнение в этом чате, затем удалите его.');
+    state.sessions = state.sessions.filter((session) => !ids.has(session.id));
+    for (let index = history.length - 1; index >= 0; index--)
+      if (ids.has(history[index]?.session_id ?? '')) history.splice(index, 1);
+  },
   events: async (sessionId, before) =>
     history
       .filter((event) => event.session_id === sessionId && event.sequence < (before ?? Infinity))

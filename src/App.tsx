@@ -10,6 +10,7 @@ import {
   Sparkles,
   Square,
   Terminal,
+  Trash2,
   X,
 } from 'lucide-react';
 import type {
@@ -21,7 +22,7 @@ import type {
   Snapshot,
 } from './contracts';
 import { browserPreview, getTransport } from './transport';
-import { eventStatus, mergeEvents } from './timeline';
+import { eventStatus, historyPageSize, mergeEvents } from './timeline';
 import { usePreference } from './preferences';
 import { useAccountState } from './accounts';
 import { Timeline } from './components/Timeline';
@@ -41,6 +42,8 @@ import { ChatSettings } from './components/ChatSettings';
 import { TeamPanel } from './components/TeamPanel';
 import { ProjectChanges } from './components/ProjectChanges';
 import { ExtensionsDialog } from './components/ExtensionsDialog';
+import { ContextMenu } from './components/ContextMenu';
+import { Dialog } from './components/Dialog';
 import { modeLabels } from './chat';
 import type { DraftAttachment } from './attachments';
 import { counted, errorText, sessionTitle, statusLabels } from './locale';
@@ -53,9 +56,8 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, DraftAttachment[]>>({});
-  const [historyPage, setHistoryPage] = useState(false);
-  const browsingHistory = useRef(historyPage);
-  browsingHistory.current = historyPage;
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [deleting, setDeleting] = useState<Session | null>(null);
   const [dialog, setDialog] = useState<
     'new' | 'settings' | 'commands' | 'files' | 'changes' | 'plugins' | null
   >(null);
@@ -126,13 +128,12 @@ export function App() {
       const incoming = batch;
       batch = [];
       if (!alive) return;
-      if (!browsingHistory.current)
-        setEvents((current) =>
-          mergeEvents(
-            current,
-            incoming.filter((event) => event.session_id === currentId.current),
-          ),
-        );
+      setEvents((current) =>
+        mergeEvents(
+          current,
+          incoming.filter((event) => event.session_id === currentId.current),
+        ),
+      );
       setData((current) =>
         current
           ? {
@@ -228,17 +229,29 @@ export function App() {
 
   useEffect(() => {
     setEvents([]);
-    setHistoryPage(false);
+    setHistoryLoading(false);
     if (!client || !sessionId) return;
     let alive = true;
-    void client
-      .events(sessionId)
-      .then((history) => {
-        if (alive) setEvents((current) => mergeEvents(current, history));
-      })
-      .catch((error) => {
+    void (async () => {
+      try {
+        // Newest page first so the chat opens at once, then every older page of the stored
+        // history; live events keep merging in meanwhile.
+        let page = await client.events(sessionId);
+        if (!alive) return;
+        setEvents((current) => mergeEvents(current, page));
+        setHistoryLoading(page.length >= historyPageSize);
+        while (alive && page.length >= historyPageSize && page[0]) {
+          page = await client.events(sessionId, page[0].sequence);
+          if (!alive) return;
+          const older = page;
+          setEvents((current) => mergeEvents(current, older));
+        }
+      } catch (error) {
         if (alive) setError(errorText(error));
-      });
+      } finally {
+        if (alive) setHistoryLoading(false);
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -246,7 +259,6 @@ export function App() {
 
   // Reconcile a snapshot/live race from the durable latest timeline, including UI reloads.
   useEffect(() => {
-    if (historyPage) return;
     const status = events
       .filter((event) => event.session_id === sessionId)
       .reverse()
@@ -269,7 +281,7 @@ export function App() {
         ),
       };
     });
-  }, [events, sessionId, historyPage]);
+  }, [events, sessionId]);
 
   // Accounts live in the core; the UI re-reads them after account changes or sign-in events.
   const reloadAccounts = useCallback(() => {
@@ -498,6 +510,23 @@ export function App() {
         accountState={accountState}
         openUsage={(provider) => client && void action(() => client.openUsage(provider))}
         preview={browserPreview}
+        deleteChat={setDeleting}
+      />
+      <ContextMenu
+        extraActions={(target) => {
+          const id = target.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId;
+          const chat = data?.sessions.find((item) => item.id === id && !item.parent_session_id);
+          return chat && chat.status !== 'running' && !busy
+            ? [
+                {
+                  label: 'Удалить чат',
+                  icon: <Trash2 size={15} />,
+                  danger: true,
+                  run: () => setDeleting(chat),
+                },
+              ]
+            : [];
+        }}
       />
 
       <main className="main-workspace">
@@ -568,24 +597,6 @@ export function App() {
                     configure={(member) => setAgentDialog({ id: member.id, handoff: false })}
                   />
                 )}
-                {historyPage && (
-                  <button
-                    className="history-banner"
-                    onClick={() =>
-                      client &&
-                      void action(async () => {
-                        const selected = session.id;
-                        const latest = await client.events(selected);
-                        if (currentId.current === selected) {
-                          setEvents(latest);
-                          setHistoryPage(false);
-                        }
-                      })
-                    }
-                  >
-                    Просмотр истории · вернуться к последним событиям
-                  </button>
-                )}
                 <Timeline
                   session={session}
                   providerName={providerName(session.provider)}
@@ -611,18 +622,25 @@ export function App() {
                   chooseAnotherAccount={() => {
                     setAgentDialog({ id: session.id, handoff: true });
                   }}
+                  changes={
+                    client &&
+                    workspace &&
+                    workspace.id !== 'chat-scratch' &&
+                    session.provider !== 'mock'
+                      ? {
+                          load: async () => {
+                            const [status, diff] = await Promise.all([
+                              client.gitStatus(workspace.id),
+                              client.gitDiff(workspace.id),
+                            ]);
+                            return { status, diff };
+                          },
+                          open: () => setDialog('changes'),
+                        }
+                      : undefined
+                  }
                   events={events.filter((event) => event.session_id === session.id)}
-                  loadOlder={() => {
-                    if (!client || !events.length) return;
-                    const selected = session.id;
-                    void action(async () => {
-                      const older = await client.events(selected, events[0]?.sequence);
-                      if (currentId.current === selected && older.length) {
-                        setHistoryPage(true);
-                        setEvents(older);
-                      }
-                    });
-                  }}
+                  historyLoading={historyLoading}
                 />
                 <Composer
                   key={session.id}
@@ -810,6 +828,37 @@ export function App() {
           workspace={workspace}
           close={() => setDialog(null)}
         />
+      )}
+      {deleting && client && (
+        <Dialog title="Удалить чат?" close={() => setDeleting(null)}>
+          <p className="dialog-description">
+            Чат «{sessionTitle(deleting.title)}», его участники и вся история будут удалены с этого
+            компьютера без возможности восстановления. Файлы проекта не изменятся. История на
+            стороне ChatGPT или Claude этим не удаляется.
+          </p>
+          <div className="dialog-footer">
+            <button className="secondary-button" autoFocus onClick={() => setDeleting(null)}>
+              Отмена
+            </button>
+            <button
+              className="primary-button danger-solid"
+              disabled={busy}
+              onClick={() => {
+                const target = deleting;
+                setDeleting(null);
+                void action(async () => {
+                  await client.deleteChat(target.id);
+                  const snapshot = await client.snapshot();
+                  setData(snapshot);
+                  if (!snapshot.sessions.some((item) => item.id === currentId.current))
+                    setSessionId('');
+                });
+              }}
+            >
+              <Trash2 size={15} /> Удалить
+            </button>
+          </div>
+        </Dialog>
       )}
       {dialog === 'plugins' && client && data && (
         <ExtensionsDialog
