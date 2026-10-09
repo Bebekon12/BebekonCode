@@ -81,6 +81,75 @@ and [ChatGPT-plan preview limitations](https://developers.openai.com/siwc/token-
   confirmed by the user, with a visible indicator and stop control in every access mode. Not
   implemented yet; see `docs/computer-use.md`.
 
+## Unity skills and Claude tool access (owner request 2026-10-09)
+
+The owner asked to lift Claude restrictions where Anthropic's rules allow it. The team reviewer
+checked [Claude sandboxing](https://code.claude.com/docs/en/sandboxing) and the CLI reference on
+2026-10-09: skills, local plugins and MCP are documented features; on native Windows shell
+commands run **without** an OS sandbox and MCP servers run outside it. Implemented in 0.8.5;
+the real CLI 2.1.294 accepts the restricted startup in an isolated signed-out profile:
+
+- **Skill references.** Read selected skill instructions through the guarded `Read` tool. Files come from an app-managed folder in the account's
+  `CLAUDE_CONFIG_DIR`, not from the user's global profile. File tools may only read skill files;
+  the credential and `.claude` path denials for project files stay.
+- **Shell (PowerShell/Bash).** Offered in write profiles only. Every command goes through the
+  existing PermissionRequest hook as a visible approval card with the exact command and folder,
+  also in `workspace_auto` (no OS sandbox on Windows). Read-only participants never get shell.
+- **MCP.** Only servers the user added in BebekonCode, passed with `--strict-mcp-config` and an
+  explicit `--mcp-config`; tools named `mcp__<server>__*` are allowed per call through the same
+  hook. Screen-capture tools (Unity MCP view capture may fall back to the whole desktop) always
+  need a separate approval.
+- **Full access for Claude remains unavailable.** The repository exception names Codex;
+  `--restricted` also explicitly refuses `bypassPermissions`. The previous plan incorrectly
+  treated documentation of a bypass flag as authorization to remove the guarded adapter.
+  Write profiles retain restricted mode, file-path checks and individual shell/MCP approvals.
+- **Unity.** The official Unity plugin 0.1.8-beta (Unity Technologies) ships 32 skills and documents
+  manual skill installation. Many skills drive the editor through Unity CLI and
+  `com.unity.pipeline` (0.6.0-exp.1+ required by the current CLI). `unity mcp configure codex`
+  changes sandbox network settings and is never run automatically.
+
+Implementation references re-fetched on 2026-10-09: [CLI reference](https://code.claude.com/docs/en/cli-reference),
+[hooks](https://code.claude.com/docs/en/hooks), [environment variables](https://code.claude.com/docs/en/env-vars),
+[Codex local MCP](https://learn.chatgpt.com/docs/extend/mcp), and Unity's
+[official manual installation](https://github.com/Unity-Technologies/unity-agent-plugin#manual-install).
+Restricted mode permits individually named shell tools via `--tools`. `--disable-slash-commands`
+is retained on every run and the native `Skill` tool remains denied. Selected account skill names
+and paths are passed with the documented `--append-system-prompt`; their files and resources can
+be read on demand, with explicit `--add-dir` for those directories. This is app-managed reference
+loading, not native skill execution. Account-managed references with executable hooks or forked
+contexts are unavailable. Reads are checked against the chat's
+selection; profile files remain unwritable through file tools. Shell and MCP are **not OS-sandboxed**
+on native Windows: exact inputs require a fresh approval, never a session grant. The subprocess
+environment scrub is enabled in addition to the existing environment allowlist.
+Account profile directories (including other provider profiles) are blocked through file tools
+even when the user chooses a parent directory as the project; only selected skill resources can
+be read. Native slash/Skill activation is disabled, so a project skill cannot shadow the selected
+account reference or register executable skill hooks. Frontmatter with hooks, contexts, escaped
+keys or YAML aliases, and embedded skill plugins, is unavailable.
+
+Re-fetched the official [headless bare-mode reference](https://code.claude.com/docs/en/headless#start-faster-with-bare-mode)
+and CLI safe-mode reference before finalizing the implementation. `--bare` skips subscription
+login and requires an API key; `--safe-mode` disables customization including MCP and skills.
+Neither is enabled on this subscription route. No credentials are copied or converted to work
+around these constraints. Native Skill execution remains visibly unavailable; reference loading
+uses normal documented file tools and does not execute skill metadata.
+
+New local stdio MCP definitions are stored per Claude account, without environment variables,
+tokens or URLs. Saving a definition does not launch a server. Read-only workers receive no MCP.
+Codex's existing configured MCP inventory is preserved; adding app-managed servers for Codex stays
+unavailable until a bridge can enforce individual computer-use consent in full-access chats.
+External local executables are user-selected and not an OS filesystem security boundary. No
+credential isolation guarantee is claimed for shell or MCP processes on native Windows.
+
+Local verification on 2026-10-09: 32 Unity skills from commit
+`cf6b2da24e424b0a60d560a57f39f676cb6f79f3` installed separately into the existing OpenAI and Claude
+profiles using Skill Installer. The selected Unity 6000.5.7f1 project resolved Pipeline
+`0.8.0-exp.1` and official built-in Tilemap `1.0.0`. Both official Unity stdio MCP `editor_status`
+and CLI `editor_status` succeeded. CLI `eval` created a separate rectangular test palette and
+verified its `GridPalette` sub-asset. No screen capture or OS input was used. This proves the
+Unity CLI/package connection on that project, not authenticated end-to-end tool invocation through
+each provider adapter. That remains unverified; the release does not claim otherwise.
+
 ## OpenAI / Codex (implemented in 0.3.0)
 
 Route: **Sign in with ChatGPT — ChatGPT plan usage for open-source and locally hosted apps**,

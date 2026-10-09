@@ -7,18 +7,21 @@ export function TeamComposerAgents({
   sessions,
   busy,
   configure,
+  rail = false,
 }: {
   session: Session;
   sessions: Session[];
   busy: boolean;
   configure: (id: string) => void;
+  /** Wide windows show the roster as a column beside the chat instead of above the composer. */
+  rail?: boolean;
 }) {
   const agents = [
     session,
     ...sessions.filter((s) => s.parent_session_id === session.id && s.chat_mode !== 'task'),
   ];
   return (
-    <div className="composer-team" aria-label="Все участники команды">
+    <div className={`composer-team ${rail ? 'team-rail' : ''}`} aria-label="Все участники команды">
       <span className="composer-team-label">
         <UsersRound size={14} /> Команда
       </span>

@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { isValidElement, memo, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
+import { richBlock, richBlockKinds } from './RichBlocks';
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
@@ -32,21 +33,42 @@ function plain(children: ReactNode): string {
     return plain((children.props as { children: ReactNode }).children);
   return '';
 }
-export function ChatMarkdown({ text, streaming }: { text: string; streaming: boolean }) {
+function language(children: ReactNode): string {
+  const child = Array.isArray(children) ? children[0] : children;
+  if (!isValidElement(child)) return '';
+  const className = (child.props as { className?: unknown }).className;
+  return typeof className === 'string' ? className : '';
+}
+// Markdown parsing is the costliest part of a long chat; finished answers render once.
+export const ChatMarkdown = memo(function ChatMarkdown({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
   return (
     <div className="chat-markdown">
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
-          pre: ({ children }) => (
-            <div className="code-review-block">
-              <div className="code-block-toolbar">
-                <span>Код</span>
-                <CopyButton text={plain(children)} label="Копировать код" />
+          pre: ({ children }) => {
+            const kind = /language-bebekon-(\w+)/.exec(language(children))?.[1];
+            if (kind && (richBlockKinds as readonly string[]).includes(kind)) {
+              const block = richBlock(kind, plain(children));
+              if (block) return block;
+              if (streaming) return <p className="muted small">Готовим визуализацию…</p>;
+            }
+            return (
+              <div className="code-review-block">
+                <div className="code-block-toolbar">
+                  <span>Код</span>
+                  <CopyButton text={plain(children)} label="Копировать код" />
+                </div>
+                <pre>{children}</pre>
               </div>
-              <pre>{children}</pre>
-            </div>
-          ),
+            );
+          },
           table: ({ children }) => (
             <div className="markdown-table">
               <table>{children}</table>
@@ -69,4 +91,4 @@ export function ChatMarkdown({ text, streaming }: { text: string; streaming: boo
       )}
     </div>
   );
-}
+});

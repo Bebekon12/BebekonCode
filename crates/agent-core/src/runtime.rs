@@ -719,6 +719,29 @@ impl Core {
         self.engine(&account.provider)?.extensions(&account).await
     }
 
+    pub async fn account_mcp(&self, id: &str) -> Result<Vec<crate::mcp::LocalMcpServer>> {
+        crate::mcp::read(&self.account(id).await?)
+    }
+
+    pub async fn save_account_mcp(
+        &self,
+        id: &str,
+        servers: Vec<crate::mcp::LocalMcpServer>,
+    ) -> Result<()> {
+        let account = self.account(id).await?;
+        // Synchronous metadata write under the turn reservation lock. Existing processes keep
+        // their immutable snapshot; refuse any update while this account has active contexts.
+        let sessions = self.storage.sessions().await?;
+        let runs = self.runs.lock().map_err(|_| CoreError::Busy)?;
+        if sessions
+            .iter()
+            .any(|s| s.account_profile_id == id && runs.contains_key(&s.id))
+        {
+            return Err(CoreError::Busy);
+        }
+        crate::mcp::save(&account, &servers)
+    }
+
     /// Only images explicitly attached to this chat may be returned to the client.
     pub async fn attachment_image(&self, session_id: &str, path: &str) -> Result<String> {
         let session = self.storage.session(session_id).await?;

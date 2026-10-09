@@ -1,6 +1,7 @@
 import { forwardRef, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ArrowUpRight, Square, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
 import { ImagePreview } from './ImagePreview';
+import type { ExtensionItem } from '../contracts';
 import {
   attachmentHint,
   attachmentSize,
@@ -23,6 +24,9 @@ export const Composer = forwardRef<
     setAttachments: (value: DraftAttachment[]) => void;
     /** Shown when requests use the user's ChatGPT plan (Sign in with ChatGPT guidelines). */
     manageUsage?: () => void;
+    mcpServers?: ExtensionItem[];
+    selectMcp?: (server: ExtensionItem) => void;
+    mcpActive?: boolean;
   }
 >(function Composer(
   {
@@ -37,12 +41,16 @@ export const Composer = forwardRef<
     manageUsage,
     attachments,
     setAttachments,
+    mcpServers = [],
+    selectMcp,
+    mcpActive = false,
   },
   ref,
 ) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [image, setImage] = useState<DraftAttachment>();
   const [error, setError] = useState('');
+  const mention = draft.match(/@([A-Za-z0-9-]*)$/)?.[1];
   const [reading, setReading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const readingRef = useRef(false);
@@ -134,6 +142,30 @@ export const Composer = forwardRef<
                 </button>
               </div>
             ))}
+          </div>
+        )}
+        {running && mcpActive && (
+          <p role="status" className="notice">
+            MCP активен · каждый внешний вызов с подтверждением. Кнопка остановки завершает процесс.
+          </p>
+        )}
+        {mention !== undefined && !running && (
+          <div className="mcp-mentions" aria-label="Выбор MCP">
+            {mcpServers
+              .filter((s) => s.enabled && s.name.toLowerCase().includes(mention.toLowerCase()))
+              .map((server) => (
+                <button
+                  type="button"
+                  key={server.id}
+                  disabled={busy}
+                  onClick={() => selectMcp?.(server)}
+                >
+                  @{server.name}
+                </button>
+              ))}
+            {!mcpServers.length && (
+              <span className="small muted">Добавьте MCP в настройках аккаунта.</span>
+            )}
           </div>
         )}
         <textarea

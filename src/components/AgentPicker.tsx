@@ -85,7 +85,8 @@ export function AgentPicker({
   }, [client, toolsOpen, value.account_profile_id]);
   const model = models.find((item) => item.id === value.model);
   const accounts = data.accounts.filter((a) => a.provider === value.provider);
-  const selected = (kind: keyof ToolPolicy, id: string) => value.tools[kind]?.includes(id) ?? true;
+  const selected = (kind: keyof ToolPolicy, id: string) =>
+    value.tools[kind]?.includes(id) ?? !(value.provider === 'anthropic' && kind === 'mcp_servers');
   return (
     <div className="agent-picker">
       {value.provider === 'mock' && (
@@ -98,8 +99,9 @@ export function AgentPicker({
         <details className="small muted">
           <summary>Возможности Claude в Windows</summary>
           <p>
-            Модель и доступ проверяет Anthropic. Доступны файлы проекта; оболочка, плагины и MCP
-            пока недоступны.
+            Модель и доступ проверяет Anthropic. Доступны файлы проекта и инструкции выбранных
+            навыков аккаунта. Команды shell и локальный MCP требуют отдельного подтверждения:
+            песочницы ОС Windows нет. Встроенный Skill, плагины и полный доступ Claude недоступны.
           </p>
         </details>
       )}
@@ -261,21 +263,22 @@ export function AgentPicker({
                   {{ plugins: 'Плагины', mcp_servers: 'MCP-серверы', skills: 'Навыки' }[kind]}
                 </legend>
                 {!extensions[kind].length && <p className="small muted">Нет подключённых</p>}
-                {extensions[kind].length > 0 && (
-                  <label className="tool-choice">
-                    <input
-                      type="checkbox"
-                      checked={value.tools[kind] == null}
-                      onChange={(e) =>
-                        change({
-                          ...value,
-                          tools: { ...value.tools, [kind]: e.target.checked ? null : [] },
-                        })
-                      }
-                    />{' '}
-                    Все доступные этому аккаунту
-                  </label>
-                )}
+                {extensions[kind].length > 0 &&
+                  !(value.provider === 'anthropic' && kind === 'mcp_servers') && (
+                    <label className="tool-choice">
+                      <input
+                        type="checkbox"
+                        checked={value.tools[kind] == null}
+                        onChange={(e) =>
+                          change({
+                            ...value,
+                            tools: { ...value.tools, [kind]: e.target.checked ? null : [] },
+                          })
+                        }
+                      />{' '}
+                      Все доступные этому аккаунту
+                    </label>
+                  )}
                 {extensions[kind].map((item) => (
                   <label
                     className="tool-choice"
@@ -289,7 +292,9 @@ export function AgentPicker({
                       onChange={(e) => {
                         const ids =
                           value.tools[kind] ??
-                          extensions[kind].filter((i) => i.enabled && i.id).map((i) => i.id!);
+                          (value.provider === 'anthropic' && kind === 'mcp_servers'
+                            ? []
+                            : extensions[kind].filter((i) => i.enabled && i.id).map((i) => i.id!));
                         change({
                           ...value,
                           tools: {

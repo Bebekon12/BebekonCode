@@ -17,15 +17,12 @@ type Grants = Arc<Mutex<HashSet<(String, PathBuf)>>>;
 pub(super) fn settings(pipe: &str, executable: &Path, profile: &str) -> Value {
     let hook = json!({"type":"command", "command":executable, "args":["--claude-hook", pipe], "timeout":300});
     let mut deny = vec![
-        "Bash",
-        "PowerShell",
         "Monitor",
         "Agent",
         "Skill",
         "NotebookEdit",
         "WebFetch",
         "WebSearch",
-        "mcp__*",
         "Read(./.env*)",
         "Read(./**/.env*)",
         "Read(./**/*.key)",
@@ -44,9 +41,13 @@ pub(super) fn settings(pipe: &str, executable: &Path, profile: &str) -> Value {
         "Read(./**/*.p12)",
     ];
     if profile == "read_only" {
-        deny.extend(["Edit", "Write"]);
+        deny.extend(["Edit", "Write", "Bash", "PowerShell", "Skill", "mcp__*"]);
     }
-    json!({"permissions":{"defaultMode":if profile == "workspace_auto" { "acceptEdits" } else { "default" }, "ask":if profile == "workspace_auto" { vec![] } else { vec!["Edit","Write"] }, "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
+    let mut ask = vec!["Bash", "PowerShell", "mcp__*"];
+    if profile != "workspace_auto" {
+        ask.extend(["Edit", "Write"]);
+    }
+    json!({"permissions":{"defaultMode":if profile == "workspace_auto" { "acceptEdits" } else { "default" }, "ask":ask, "deny":deny}, "hooks": {"PreToolUse":[{"matcher":".*","hooks":[hook.clone()]}], "PermissionRequest":[{"matcher":".*","hooks":[hook]}]}, "enabledPlugins":{}, "disableAllHooks":false})
 }
 
 fn response(event: &str, allowed: bool) -> Value {
@@ -171,6 +172,7 @@ impl Drop for Bridge {
 impl Bridge {
     pub async fn start(
         request: &super::TurnRequest,
+        access: &super::access::Access,
         events: mpsc::Sender<EventPayload>,
         stop: CancellationToken,
         pending: Approvals,
@@ -188,6 +190,7 @@ impl Bridge {
         let next_pipe = pipe.clone();
         let child_stop = stop.clone();
         let session = request.session.clone();
+        let access = access.clone();
         let task = tokio::spawn(async move {
             loop {
                 if tokio::select! { _ = child_stop.cancelled() => true, result = server.connect() => result.is_err() }
@@ -206,6 +209,7 @@ impl Bridge {
                 let pending = pending.clone();
                 let grants = grants.clone();
                 let session = session.clone();
+                let access = access.clone();
                 let events = events.clone();
                 tokio::spawn(async move {
                     let mut stream = tokio::io::BufReader::new(connected);
@@ -219,7 +223,10 @@ impl Bridge {
                     let Ok(input) = serde_json::from_slice::<Value>(&bytes) else {
                         return;
                     };
-                    let answer = decide(&session, input, &events, &stop, &pending, &grants).await;
+                    let answer = decide_with_access(
+                        &session, input, &events, &stop, &pending, &grants, &access,
+                    )
+                    .await;
                     let mut answer = answer.to_string();
                     answer.push('\n');
                     let _ = stream.get_mut().write_all(answer.as_bytes()).await;
@@ -234,6 +241,7 @@ impl Bridge {
 impl Bridge {
     pub async fn start(
         _request: &super::TurnRequest,
+        _access: &super::access::Access,
         _events: mpsc::Sender<EventPayload>,
         _stop: CancellationToken,
         _pending: Approvals,
@@ -246,6 +254,7 @@ impl Bridge {
     }
 }
 
+#[cfg(test)]
 pub(super) async fn decide(
     session: &Session,
     value: Value,
@@ -254,12 +263,58 @@ pub(super) async fn decide(
     pending: &Approvals,
     grants: &Grants,
 ) -> Value {
+    decide_with_access(
+        session,
+        value,
+        events,
+        cancel,
+        pending,
+        grants,
+        &super::access::Access::default(),
+    )
+    .await
+}
+
+pub(super) async fn decide_with_access(
+    session: &Session,
+    value: Value,
+    events: &mpsc::Sender<EventPayload>,
+    cancel: &CancellationToken,
+    pending: &Approvals,
+    grants: &Grants,
+    access: &super::access::Access,
+) -> Value {
     let event = value["hook_event_name"].as_str().unwrap_or("");
     let tool = value["tool_name"].as_str().unwrap_or("");
     if !["PreToolUse", "PermissionRequest"].contains(&event) {
         return response(event, false);
     }
-    let Ok(path) = checked_path(
+    if cancel.is_cancelled() {
+        return response(event, false);
+    }
+    let external = ["Bash", "PowerShell"].contains(&tool) || access.is_mcp_tool(tool);
+    if external {
+        if !["standard", "workspace_auto"].contains(&session.permission_profile.as_str()) {
+            return response(event, false);
+        }
+        let input = &value["tool_input"];
+        let preview = if ["Bash", "PowerShell"].contains(&tool) {
+            input["command"].as_str().unwrap_or("").to_string()
+        } else {
+            input.to_string()
+        };
+        if preview.trim().is_empty()
+            || preview.len() > 4000
+            || crate::redaction::redact(&preview) != preview
+        {
+            return response(event, false);
+        }
+        if event == "PreToolUse" {
+            return response(event, true);
+        }
+        return manual_decision(session, value, None, events, cancel, pending, grants).await;
+    }
+    let Ok(path) = access.checked_file(
         Path::new(&session.working_directory),
         &value["tool_input"],
         tool,
@@ -285,19 +340,20 @@ pub(super) async fn decide(
         } else {
             // An unexpected provider approval is still forwarded to the user below.
             // Automatic edits should not normally produce PermissionRequest.
-            return manual_decision(session, value, path, events, cancel, pending, grants).await;
+            return manual_decision(session, value, Some(path), events, cancel, pending, grants)
+                .await;
         };
     }
     if event == "PreToolUse" {
         return response(event, true);
     }
-    manual_decision(session, value, path, events, cancel, pending, grants).await
+    manual_decision(session, value, Some(path), events, cancel, pending, grants).await
 }
 
 async fn manual_decision(
     session: &Session,
     value: Value,
-    path: PathBuf,
+    path: Option<PathBuf>,
     events: &mpsc::Sender<EventPayload>,
     cancel: &CancellationToken,
     pending: &Approvals,
@@ -305,10 +361,11 @@ async fn manual_decision(
 ) -> Value {
     let event = "PermissionRequest";
     let tool = value["tool_name"].as_str().unwrap_or("");
-    if grants
-        .lock()
-        .is_ok_and(|grants| grants.contains(&(session.id.clone(), path.clone())))
-    {
+    if path.as_ref().is_some_and(|path| {
+        grants
+            .lock()
+            .is_ok_and(|grants| grants.contains(&(session.id.clone(), path.clone())))
+    }) {
         return response(event, true);
     }
     let id = Uuid::new_v4().to_string();
@@ -318,6 +375,7 @@ async fn manual_decision(
             id.clone(),
             Pending {
                 session: session.id.clone(),
+                allow_session: path.is_some(),
                 answer: tx,
             },
         );
@@ -325,7 +383,13 @@ async fn manual_decision(
         return response(event, false);
     }
     let input = &value["tool_input"];
-    let preview = if tool == "Edit" {
+    let preview = if path.is_none() {
+        if ["Bash", "PowerShell"].contains(&tool) {
+            input["command"].as_str().unwrap_or("").to_string()
+        } else {
+            input.to_string()
+        }
+    } else if tool == "Edit" {
         format!(
             "Было:\n{}\n\nСтанет:\n{}",
             input["old_string"].as_str().unwrap_or(""),
@@ -336,7 +400,9 @@ async fn manual_decision(
     };
     let detail = format!(
         "{}\n\n{}",
-        path.display(),
+        path.as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| tool.to_string()),
         crate::redaction::redact(&preview)
             .chars()
             .take(4000)
@@ -344,22 +410,20 @@ async fn manual_decision(
     );
     let sent = events
         .send(EventPayload::ApprovalRequested {
-            available_decisions: None,
+            available_decisions: if path.is_some() { None } else { Some(vec![ApprovalDecision::AllowOnce, ApprovalDecision::Deny]) },
             id: id.clone(),
-            kind: "file_change".into(),
-            title: format!(
+            kind: if path.is_some() { "file_change" } else { "command" }.into(),
+            title: if path.is_none() { format!("Claude просит выполнить {tool}") } else { format!(
                 "Claude просит {} файл",
                 if tool == "Write" {
                     "записать"
                 } else {
                     "изменить"
                 }
-            ),
+            ) },
             detail,
             cwd: Some(session.working_directory.clone()),
-            reason: Some(
-                "Разрешение действует только внутри проекта. «Разрешить на сессию» относится только к этому файлу и хранится до выхода из аккаунта или перезапуска приложения. Команды оболочки недоступны.".into(),
-            ),
+            reason: Some(if path.is_some() { "Разрешение относится только к этому файлу проекта и хранится до выхода или перезапуска." } else { "Внешний инструмент работает без песочницы ОС Windows. Доступ к учётным данным запрещён. Подтверждение действует только на этот вызов; захват экрана, мышь и клавиатура также требуют отдельного подтверждения." }.into()),
         })
         .await;
     let decision = if sent.is_err() {
@@ -371,7 +435,7 @@ async fn manual_decision(
         pending.remove(&id);
     }
     if decision == ApprovalDecision::AllowSession {
-        if let Ok(mut grants) = grants.lock() {
+        if let (Some(path), Ok(mut grants)) = (path, grants.lock()) {
             grants.insert((session.id.clone(), path));
         }
     }

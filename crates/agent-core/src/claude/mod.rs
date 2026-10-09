@@ -1,4 +1,5 @@
 //! Unmodified Claude Code CLI. Authentication is owned by the CLI, never imported.
+mod access;
 mod guard;
 mod mapping;
 #[cfg(test)]
@@ -42,6 +43,7 @@ struct Detection {
 
 pub(super) struct Pending {
     session: String,
+    allow_session: bool,
     answer: oneshot::Sender<ApprovalDecision>,
 }
 
@@ -124,7 +126,7 @@ impl ClaudeProvider {
         }
         // Only documented public status fields; never inspect credential files.
         let signed_in = success && value.get("loggedIn").and_then(Value::as_bool) == Some(true);
-        Ok(AccountStatus { account_id: account.id.clone(), state: if signed_in { "signed_in" } else { "signed_out" }.into(), email: value.get("email").and_then(Value::as_str).map(str::to_string), plan: value.get("subscriptionType").and_then(Value::as_str).map(str::to_string), manage_usage_url: Some(USAGE_URL.into()), message: Some("Авторизация хранится только официальным CLI в отдельном профиле. Команды оболочки, плагины и MCP для Claude в Windows пока недоступны.".into()), checked_at: now(), ..AccountStatus::default() })
+        Ok(AccountStatus { account_id: account.id.clone(), state: if signed_in { "signed_in" } else { "signed_out" }.into(), email: value.get("email").and_then(Value::as_str).map(str::to_string), plan: value.get("subscriptionType").and_then(Value::as_str).map(str::to_string), manage_usage_url: Some(USAGE_URL.into()), message: Some("Авторизация хранится только официальным CLI в отдельном профиле. Навыки доступны; shell и MCP без песочницы Windows требуют подтверждения каждого вызова. Плагины и полный доступ Claude недоступны.".into()), checked_at: now(), ..AccountStatus::default() })
     }
 }
 
@@ -222,7 +224,7 @@ impl AgentProvider for ClaudeProvider {
             available,
             detected_path: d.binary.map(|p| p.to_string_lossy().into_owned()),
             detail: if available {
-                format!("Claude Code {}. Отдельный вход через Anthropic. Файлы проекта и подтверждения записи; оболочка, плагины и MCP пока недоступны.", d.version.unwrap_or_default())
+                format!("Claude Code {}. Отдельный вход через Anthropic. Файлы проекта и навыки; shell и локальный MCP с подтверждением каждого вызова. Без песочницы ОС Windows. Плагины и полный доступ недоступны.", d.version.unwrap_or_default())
             } else {
                 format!("Нужен официальный нативный Claude Code {MIN_VERSION}+ для Windows. Выполните claude update и нажмите «Обновить».")
             },
@@ -412,8 +414,8 @@ impl AgentProvider for ClaudeProvider {
         }
         Ok(())
     }
-    async fn extensions(&self, _account: &AccountProfile) -> Result<Extensions> {
-        Ok(Extensions { errors: vec!["Плагины, MCP и навыки Claude пока недоступны в защищённом режиме Windows. Подключённые расширения не запускаются.".into()], ..Extensions::default() })
+    async fn extensions(&self, account: &AccountProfile) -> Result<Extensions> {
+        access::inventory(account)
     }
     async fn run(
         &self,
@@ -430,13 +432,7 @@ impl AgentProvider for ClaudeProvider {
                 "Нарушена привязка аккаунта Claude".into(),
             ));
         }
-        let policy: ToolPolicy = serde_json::from_str(&request.session.tool_policy)?;
-        if [&policy.plugins, &policy.mcp_servers, &policy.skills]
-            .into_iter()
-            .any(|ids| ids.as_ref().is_some_and(|ids| !ids.is_empty()))
-        {
-            return Err(failure("Расширения Claude в Windows недоступны", None));
-        }
+        access::Access::for_request(&request)?;
         // Claude keeps its guarded modes; full access is validated as Codex-only before this.
         crate::permissions::validate_profile("anthropic", &request.session.permission_profile)?;
         if !self.models(&request.account).await?.iter().any(|model| {
@@ -479,6 +475,13 @@ impl AgentProvider for ClaudeProvider {
         let pending = {
             let mut pending = self.pending.lock().map_err(|_| CoreError::Busy)?;
             if pending.get(id).is_some_and(|p| p.session == session_id) {
+                if decision == ApprovalDecision::AllowSession
+                    && pending.get(id).is_some_and(|p| !p.allow_session)
+                {
+                    return Err(CoreError::Invalid(
+                        "Этот инструмент требует подтверждения каждого вызова".into(),
+                    ));
+                }
                 pending.remove(id)
             } else {
                 None
@@ -530,8 +533,10 @@ impl ClaudeProvider {
         cancel: CancellationToken,
     ) -> Result<()> {
         let root = Path::new(&request.session.working_directory).canonicalize()?;
+        let access = access::Access::for_request(request)?;
         let bridge = guard::Bridge::start(
             request,
+            &access,
             events.clone(),
             cancel.child_token(),
             self.pending.clone(),
@@ -563,17 +568,25 @@ impl ClaudeProvider {
             "",
             "--strict-mcp-config",
             "--mcp-config",
-            "{\"mcpServers\":{}}",
-            "--disallowedTools",
-            "mcp__*",
-            "--disable-slash-commands",
+            &access.mcp_config().to_string(),
             "--tools",
         ]);
         command.arg(if request.session.permission_profile == "read_only" {
             "Read,Glob,Grep"
         } else {
-            "Read,Glob,Grep,Edit,Write"
+            "Read,Glob,Grep,Edit,Write,Bash,PowerShell"
         });
+        command.arg("--disable-slash-commands");
+        if access.mcp.is_empty() {
+            command.args(["--disallowedTools", "mcp__*"]);
+        }
+        for directory in access.skills.values() {
+            command.arg("--add-dir").arg(directory);
+        }
+        if !access.skills.is_empty() {
+            command.args(["--append-system-prompt", &access.guidance()]);
+        }
+        command.env("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1");
         command.args([
             "--model",
             &request.session.model,

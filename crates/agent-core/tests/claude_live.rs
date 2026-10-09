@@ -63,7 +63,7 @@ async fn isolated_signed_out_profile_and_documented_catalog() {
             && extensions.mcp_servers.is_empty()
             && extensions.skills.is_empty()
     );
-    assert!(!extensions.errors.is_empty());
+    assert!(extensions.errors.is_empty());
     core.shutdown().await;
     core.remove_account(&account.id)
         .await

@@ -5,6 +5,8 @@ import { checkUpdate, installUpdate } from './updates';
 import type { AccountEvent, AgentEvent, ClientTransport } from './contracts';
 
 export const desktop: ClientTransport = {
+  accountMcp: (accountId) => invoke('account_mcp', { accountId }),
+  saveAccountMcp: (accountId, servers) => invoke('save_account_mcp', { accountId, servers }),
   attachmentImage: (sessionId, path) => invoke('attachment_image', { sessionId, path }),
   reviewDocument: (workspaceId, path) => invoke('review_document', { workspaceId, path }),
   reviewComments: (workspaceId, path) => invoke('review_comments', { workspaceId, path }),

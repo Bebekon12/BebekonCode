@@ -4,7 +4,7 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import { ImagePreview } from './ImagePreview';
 import { effortLabels } from '../chat';
 import { attachmentHint } from '../attachments';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Ban,
@@ -49,6 +49,8 @@ const pillLabels: Record<StepState, string> = {
   failed: 'Ошибка',
   interrupted: 'Прервано',
 };
+/** Turns mounted at once; earlier ones mount in pages of this size while scrolling up. */
+const renderPage = 40;
 const filters: { id: TimelineFilter; label: string; icon: typeof Check }[] = [
   { id: 'all', label: 'Все события', icon: ListFilter },
   { id: 'agent', label: 'Действия агента', icon: Sparkles },
@@ -89,24 +91,40 @@ export function Timeline({
   const demo = session.provider === 'mock';
   const team =
     !session.parent_session_id && (session.chat_mode === 'team' || session.chat_mode === 'auto');
-  const turns = useMemo(
-    () =>
-      buildTimeline(events).map((turn) =>
-        demo
-          ? {
-              ...turn,
-              text: demoResponse(turn.text),
-              error: turn.error && demoActivity(turn.error),
-              activities: turn.activities.map((activity) => ({
-                ...activity,
-                label: demoActivity(activity.label),
-                detail: demoActivity(activity.detail),
-              })),
-            }
-          : turn,
-      ),
-    [events, demo],
-  );
+  // Finished turns keep their object identity, so memoized steps skip re-rendering while a new
+  // answer streams in. A turn changes only when its own events change.
+  const turnCache = useRef(new Map<string, { key: string; turn: TimelineTurn }>());
+  const turns = useMemo(() => {
+    const signatures = new Map<string, string>();
+    const counts = new Map<string, number>();
+    for (const event of events) {
+      const count = (counts.get(event.run_id) ?? 0) + 1;
+      counts.set(event.run_id, count);
+      signatures.set(event.run_id, `${count}:${event.sequence}:${demo}`);
+    }
+    const cache = turnCache.current;
+    const next = buildTimeline(events).map((built) => {
+      const key = signatures.get(built.id) ?? '';
+      const cached = cache.get(built.id);
+      if (cached?.key === key) return cached.turn;
+      const turn = demo
+        ? {
+            ...built,
+            text: demoResponse(built.text),
+            error: built.error && demoActivity(built.error),
+            activities: built.activities.map((activity) => ({
+              ...activity,
+              label: demoActivity(activity.label),
+              detail: demoActivity(activity.detail),
+            })),
+          }
+        : built;
+      cache.set(built.id, { key, turn });
+      return turn;
+    });
+    for (const id of cache.keys()) if (!signatures.has(id)) cache.delete(id);
+    return next;
+  }, [events, demo]);
   const [filter, setFilter] = useState<TimelineFilter>('all');
   const [image, setImage] = useState<{ name: string; src?: string; error?: string }>();
   const imageRequest = useRef(0);
@@ -125,6 +143,16 @@ export function Timeline({
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const visibleTurns = useMemo(() => filterTimeline(turns, filter, query), [turns, filter, query]);
+  // Only the latest turns are mounted; scrolling to the top mounts earlier ones in pages.
+  const [shown, setShown] = useState(renderPage);
+  const growAnchor = useRef<number | null>(null);
+  const renderedTurns = visibleTurns.slice(-shown);
+  const hiddenTurns = visibleTurns.length - renderedTurns.length;
+  const showEarlier = (count = renderPage) => {
+    const element = scroll.current;
+    if (element && growAnchor.current === null) growAnchor.current = element.scrollHeight;
+    setShown((value) => value + count);
+  };
   const allCollapsed = turns.length > 0 && turns.every((turn) => collapsed.has(turn.id));
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -143,9 +171,19 @@ export function Timeline({
     firstSequence.current = first;
     lastHeight.current = element.scrollHeight;
   }, [events]);
+  // Earlier turns were mounted above the reader: keep the same text in view.
+  useLayoutEffect(() => {
+    const element = scroll.current;
+    if (!element || growAnchor.current === null) return;
+    element.scrollTop += element.scrollHeight - growAnchor.current;
+    growAnchor.current = null;
+    lastHeight.current = element.scrollHeight;
+  }, [shown]);
   useEffect(() => {
     follow.current = true;
     firstSequence.current = undefined;
+    growAnchor.current = null;
+    setShown(renderPage);
     setCollapsed(new Set());
     setActiveTurn('');
     imageRequest.current++;
@@ -173,9 +211,14 @@ export function Timeline({
       next.delete(id);
       return next;
     });
-    if (!visibleTurns.some((turn) => turn.id === id)) {
+    const index = visibleTurns.findIndex((turn) => turn.id === id);
+    if (index < 0) {
       setFilter('all');
       setQuery('');
+      const all = turns.findIndex((turn) => turn.id === id);
+      if (all >= 0) setShown((value) => Math.max(value, turns.length - all));
+    } else if (index < hiddenTurns) {
+      setShown(visibleTurns.length - index);
     }
     requestAnimationFrame(() => {
       scroll.current
@@ -259,8 +302,11 @@ export function Timeline({
         ref={scroll}
         onScroll={() => {
           const element = scroll.current;
-          if (element)
+          if (element) {
             follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+            if (element.scrollTop < 400 && hiddenTurns > 0 && growAnchor.current === null)
+              showEarlier();
+          }
           trackActive();
         }}
       >
@@ -268,6 +314,13 @@ export function Timeline({
           {historyLoading && (
             <li className="stepper-more" role="status">
               <ThinkingIndicator label="Загружаем раннюю историю чата…" />
+            </li>
+          )}
+          {hiddenTurns > 0 && (
+            <li className="stepper-more">
+              <button className="text-button" onClick={() => showEarlier()}>
+                Показать более ранние сообщения · {hiddenTurns}
+              </button>
             </li>
           )}
           {overview && !turns.length && (
@@ -288,7 +341,7 @@ export function Timeline({
           {turns.length > 0 && visibleTurns.length === 0 && (
             <li className="stepper-empty">Подходящих событий нет.</li>
           )}
-          {visibleTurns.map((turn) => (
+          {renderedTurns.map((turn) => (
             <TurnStep
               key={turn.id}
               turn={turn}
@@ -447,7 +500,27 @@ function Step({
   );
 }
 
-function TurnStep({
+type TurnStepProps = Parameters<typeof TurnStepView>[0];
+// Callbacks are recreated on every parent render but act on the same session and turn, so only
+// data props decide whether a step re-renders. Finished turns keep identity (see turnCache).
+const TurnStep = memo(
+  TurnStepView,
+  (a: TurnStepProps, b: TurnStepProps) =>
+    a.turn === b.turn &&
+    a.filter === b.filter &&
+    a.demo === b.demo &&
+    a.team === b.team &&
+    a.providerName === b.providerName &&
+    a.model === b.model &&
+    a.interrupted === b.interrupted &&
+    a.live === b.live &&
+    a.open === b.open &&
+    a.last === b.last &&
+    !a.changes === !b.changes &&
+    !a.manageUsage === !b.manageUsage,
+);
+
+function TurnStepView({
   turn,
   filter,
   demo,

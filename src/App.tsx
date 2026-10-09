@@ -20,6 +20,7 @@ import type {
   ReleaseCheck,
   Session,
   Snapshot,
+  ExtensionItem,
 } from './contracts';
 import { browserPreview, getTransport } from './transport';
 import { eventStatus, historyPageSize, mergeEvents } from './timeline';
@@ -58,6 +59,16 @@ export function App() {
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, DraftAttachment[]>>({});
   const [historyLoading, setHistoryLoading] = useState(false);
   const [deleting, setDeleting] = useState<Session | null>(null);
+  // Team rosters move beside the chat when there is room; narrow windows keep them inline.
+  const [wideLayout, setWideLayout] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1180px)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1180px)');
+    const update = () => setWideLayout(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   const [dialog, setDialog] = useState<
     'new' | 'settings' | 'commands' | 'files' | 'changes' | 'plugins' | null
   >(null);
@@ -103,6 +114,22 @@ export function App() {
   const account = data?.accounts.find((account) => account.id === session?.account_profile_id);
   const draft = drafts[sessionId] ?? '';
   const attachments = attachmentDrafts[sessionId] ?? [];
+  const [mentionServers, setMentionServers] = useState<ExtensionItem[]>([]);
+  const wantsMcp = /@[A-Za-z0-9-]*$/.test(draft);
+  useEffect(() => {
+    let alive = true;
+    setMentionServers([]);
+    if (client && session && wantsMcp)
+      void client
+        .accountExtensions(session.account_profile_id)
+        .then((inventory) => {
+          if (alive && !inventory.errors.length) setMentionServers(inventory.mcp_servers);
+        })
+        .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [client, session?.account_profile_id, wantsMcp]);
   const running = session?.status === 'running';
   const homeSessions =
     data?.sessions.filter(
@@ -647,6 +674,47 @@ export function App() {
                 />
                 <Composer
                   key={session.id}
+                  mcpServers={mentionServers}
+                  mcpActive={(data?.sessions ?? []).some(
+                    (s) =>
+                      (s.id === session.id || s.parent_session_id === session.id) &&
+                      s.provider === 'anthropic' &&
+                      (JSON.parse(s.tool_policy).mcp_servers?.length ?? 0) > 0,
+                  )}
+                  selectMcp={(server) => {
+                    if (!client) return;
+                    const tools = JSON.parse(session.tool_policy);
+                    void action(async () => {
+                      const updated = await client.configureSession(session.id, {
+                        provider: session.provider,
+                        account_profile_id: session.account_profile_id,
+                        model: session.model,
+                        reasoning_effort: session.reasoning_effort,
+                        permission_profile: session.permission_profile,
+                        role: session.role,
+                        tools: {
+                          ...tools,
+                          mcp_servers: Array.from(
+                            new Set([...(tools.mcp_servers ?? []), server.id]),
+                          ),
+                        },
+                      });
+                      setData((current) =>
+                        current
+                          ? {
+                              ...current,
+                              sessions: current.sessions.map((s) =>
+                                s.id === updated.id ? updated : s,
+                              ),
+                            }
+                          : current,
+                      );
+                      setDrafts((current) => ({
+                        ...current,
+                        [session.id]: draft.replace(/@[A-Za-z0-9-]*$/, `@${server.name} `),
+                      }));
+                    });
+                  }}
                   attachments={attachments}
                   setAttachments={(value) =>
                     setAttachmentDrafts((current) => ({ ...current, [session.id]: value }))
@@ -654,7 +722,7 @@ export function App() {
                   controls={
                     client && (
                       <>
-                        {session.chat_mode !== 'single' && (
+                        {session.chat_mode !== 'single' && !wideLayout && (
                           <TeamComposerAgents
                             session={session}
                             sessions={data?.sessions ?? []}
@@ -783,6 +851,17 @@ export function App() {
               </div>
             )}
           </div>
+          {session && session.chat_mode !== 'single' && wideLayout && client && (
+            <aside className="team-rail-column" aria-label="Участники команды">
+              <TeamComposerAgents
+                rail
+                session={session}
+                sessions={data?.sessions ?? []}
+                busy={busy || running}
+                configure={(id) => setAgentDialog({ id, handoff: false })}
+              />
+            </aside>
+          )}
           {context && (
             <ContextPanel
               client={client}

@@ -8,6 +8,7 @@ pub mod credentials;
 pub mod error;
 pub mod files;
 pub mod git;
+pub mod mcp;
 pub mod model;
 pub mod permissions;
 pub mod process;

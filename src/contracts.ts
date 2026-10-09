@@ -217,6 +217,8 @@ export interface UpdateProgress {
   total: number | null;
 }
 export interface ClientTransport {
+  accountMcp(accountId: string): Promise<LocalMcpServer[]>;
+  saveAccountMcp(accountId: string, servers: LocalMcpServer[]): Promise<void>;
   attachmentImage(sessionId: string, path: string): Promise<string>;
   reviewDocument(workspaceId: string, path: string): Promise<ReviewDocument>;
   reviewComments(workspaceId: string, path: string): Promise<ReviewComment[]>;
@@ -265,6 +267,12 @@ export interface ClientTransport {
   gitDiff(workspaceId: string): Promise<string>;
   checkReleases(force: boolean): Promise<ReleaseCheck>;
   openReleases(): Promise<void>;
+}
+
+export interface LocalMcpServer {
+  name: string;
+  command: string;
+  args: string[];
 }
 
 export interface FileEntry {

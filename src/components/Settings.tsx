@@ -23,11 +23,18 @@ import type {
 import type { AccountState } from '../accounts';
 import { ProviderAccounts } from './Accounts';
 import { UpdatePanel } from './UpdatePanel';
+import { McpSettings } from './McpSettings';
 import product from '../../product.json';
 import pkg from '../../package.json';
 import { errorText } from '../locale';
 import { planLabel, resetLabel, windowLabel } from '../usage';
 const categories = [
+  {
+    id: 'MCP',
+    label: 'MCP-серверы',
+    icon: Puzzle,
+    description: 'Локальные серверы, отдельные аккаунты и подтверждения вызовов.',
+  },
   {
     id: 'Основные',
     label: 'Основные',
@@ -486,6 +493,10 @@ export function Settings({
                   правки в песочнице автоматически; отдельное подтверждение каждой правки Codex в
                   этой версии недоступно.
                 </p>
+                <p>
+                  Команды shell и MCP у Claude на Windows работают без песочницы ОС и требуют
+                  подтверждения каждого вызова, включая режим «Авто в проекте».
+                </p>
               </div>
               <div className="provider-card">
                 <strong>Только чтение</strong>
@@ -510,6 +521,7 @@ export function Settings({
               </div>
             </>
           )}
+          {tab === 'MCP' && <McpSettings client={client} accounts={accounts} />}
           {tab === 'Возможности' && (
             <>
               <div className="provider-card">

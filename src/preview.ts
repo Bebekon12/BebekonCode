@@ -9,6 +9,7 @@ import type {
   ClientTransport,
   ReviewComment,
   Snapshot,
+  LocalMcpServer,
 } from './contracts';
 import pkg from '../package.json';
 import product from '../product.json';
@@ -112,7 +113,20 @@ function previewStatus(accountId: string): AccountStatus {
 }
 
 const reviewComments: ReviewComment[] = [];
+const localMcp = new Map<string, LocalMcpServer[]>();
 export const preview: ClientTransport = {
+  accountMcp: async (id) => structuredClone(localMcp.get(id) ?? []),
+  saveAccountMcp: async (id, servers) => {
+    if (new Set(servers.map((s) => s.name)).size !== servers.length)
+      throw new Error('Имена MCP должны быть уникальны.');
+    if (
+      servers.some(
+        (s) => !/^[A-Za-z0-9-]+$/.test(s.name) || !/^[A-Za-z]:[\\/].*\.exe$/i.test(s.command),
+      )
+    )
+      throw new Error('Нужен абсолютный путь к exe.');
+    localMcp.set(id, structuredClone(servers));
+  },
   attachmentImage: async (sessionId, path) => {
     const src = attachmentImages.get(`${sessionId}:${path}`);
     if (!src) throw new Error('Изображение не найдено в истории предпросмотра.');
@@ -475,9 +489,23 @@ export const preview: ClientTransport = {
     state.accounts.find((a) => a.id === accountId)?.provider === 'anthropic'
       ? {
           plugins: [],
-          mcp_servers: [],
-          skills: [],
-          errors: ['Плагины, MCP и навыки Claude пока недоступны в Windows.'],
+          mcp_servers: (localMcp.get(accountId) ?? []).map((s) => ({
+            id: s.name,
+            name: s.name,
+            detail: 'Предпросмотр: локальный stdio',
+            enabled: true,
+            status: 'configured',
+          })),
+          skills: [
+            {
+              id: 'preview-claude-skill',
+              name: 'Пример навыка Claude',
+              detail: 'Предпросмотр',
+              enabled: true,
+              status: 'account',
+            },
+          ],
+          errors: [],
         }
       : {
           plugins: [

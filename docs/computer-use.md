@@ -27,6 +27,26 @@ BebekonCode therefore ships its own MCP server; the model only proposes actions.
    approval cards show the screenshot area and exact text to be typed. Stop cancels the run and
    releases held keys/buttons.
 
+## Economical perception (requested by the owner, 2026-10-09)
+
+Images are the most expensive model input. The server answers "what is on screen" locally first
+and sends pixels only when text is not enough. Tool `observe` returns, in order of preference:
+
+1. **UI Automation tree** (Windows accessibility API): window title, focused element and visible
+   controls with name, role, state and bounding box. Free, exact, no OCR errors; covers most
+   native and browser UIs. Clicks can target an element id instead of raw coordinates.
+2. **Local OCR** (`Windows.Media.Ocr`, built into Windows, no network): words with boxes and a
+   confidence value for areas where the tree is empty (games, canvases, remote desktops, images).
+3. **Change detection**: a perceptual hash per screen tile; unchanged tiles are reported as
+   "без изменений" instead of being re-read or re-sent.
+4. **Image crop, only on demand**: the model calls `screenshot(region)` when the task is visual
+   (layout, colours, art review), OCR confidence is low or text is clearly missing. The crop is
+   downscaled to the smallest size that keeps the region legible.
+
+The model decides with the cheap layers first; the server never sends a full frame implicitly.
+Every `observe` and `screenshot` still needs the user's approval (see Rules). The UI shows which
+layer produced each answer and approximate token savings once real measurements exist.
+
 ## Rules (from AGENTS.md)
 
 - Every action, including each `screenshot`, needs a separate user decision in every access
@@ -41,8 +61,9 @@ BebekonCode therefore ships its own MCP server; the model only proposes actions.
 
 ## Phases
 
-1. MCP server skeleton with `screenshot` only, approval bridge, per-chat toggle, indicator, tests
-   with a fake desktop backend (no real input in CI).
+1. MCP server skeleton with `observe` (UI Automation + local OCR + change detection) and
+   `screenshot(region)`, approval bridge, per-chat toggle, indicator, tests with a fake desktop
+   backend (no real input in CI).
 2. Pointer and keyboard tools, stop/release handling, timeout and denial tests.
 3. Claude support through the hook bridge.
 4. Manual QA on a real Windows session: approvals, stop, multi-monitor and DPI scaling.

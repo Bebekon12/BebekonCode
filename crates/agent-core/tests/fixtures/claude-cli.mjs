@@ -26,13 +26,19 @@ if (args[0] === 'auth') {
 const option = (name) => args[args.indexOf(name) + 1];
 if (
   !args.includes('--restricted') ||
+  !args.includes('--disable-slash-commands') ||
   option('--permission-mode') !== 'default' ||
   option('--setting-sources') !== '' ||
   !args.includes('--strict-mcp-config')
 )
   process.exit(24);
 const settings = JSON.parse(option('--settings'));
-if (settings.permissions.ask.join(',') !== 'Edit,Write') process.exit(25);
+if (
+  !['Edit', 'Write', 'Bash', 'PowerShell', 'mcp__*'].every((tool) =>
+    settings.permissions.ask.includes(tool),
+  )
+)
+  process.exit(25);
 const pipe = settings.hooks.PreToolUse[0].hooks[0].args[1];
 const exchange = (value) =>
   new Promise((resolve, reject) => {

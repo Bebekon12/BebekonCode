@@ -427,6 +427,31 @@ async fn account_extensions(
         .await
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+async fn account_mcp(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::mcp::LocalMcpServer>> {
+    state
+        .core
+        .account_mcp(&account_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_account_mcp(
+    account_id: String,
+    servers: Vec<agent_core::mcp::LocalMcpServer>,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .save_account_mcp(&account_id, servers)
+        .await
+        .map_err(|e| e.to_string())
+}
 /// Opens the provider's official usage page. Only allowlisted provider URLs can be opened.
 #[tauri::command]
 fn open_usage(provider: String, app: tauri::AppHandle) -> IpcResult<()> {
@@ -643,6 +668,8 @@ fn main() {
             account_logout,
             account_models,
             account_extensions,
+            account_mcp,
+            save_account_mcp,
             attachment_image,
             resolve_approval,
             open_usage,

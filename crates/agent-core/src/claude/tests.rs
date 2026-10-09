@@ -8,6 +8,196 @@ fn requires_supported_official_cli() {
     assert!(version_supported(Some("2.1.294")));
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn shell_and_mcp_always_require_fresh_consent_even_in_auto() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut session = turn(temp.path()).session;
+    session.permission_profile = "workspace_auto".into();
+    let mut access = access::Access::default();
+    access.mcp = vec![crate::mcp::LocalMcpServer {
+        name: "unity".into(),
+        command: "C:/tools/unity.exe".into(),
+        args: vec!["mcp".into()],
+    }];
+    let (tx, mut rx) = mpsc::channel(32);
+    for tool in ["Bash", "PowerShell", "mcp__unity__capture_scene_view"] {
+        let value = json!({"hook_event_name":"PreToolUse", "tool_name":tool, "tool_input":{"command":"Write-Output safe"}});
+        let answer = guard::decide_with_access(
+            &session,
+            value.clone(),
+            &tx,
+            &CancellationToken::new(),
+            &provider.pending,
+            &provider.grants,
+            &access,
+        )
+        .await;
+        assert_eq!(answer["hookSpecificOutput"]["permissionDecision"], "ask");
+        while let Ok(event) = rx.try_recv() {
+            assert!(matches!(event, EventPayload::ApprovalResolved { .. }));
+        }
+        for _ in 0..2 {
+            let mut value = value.clone();
+            value["hook_event_name"] = json!("PermissionRequest");
+            let p = provider.clone();
+            let session_copy = session.clone();
+            let tx = tx.clone();
+            let access = access.clone();
+            let job = tokio::spawn(async move {
+                guard::decide_with_access(
+                    &session_copy,
+                    value,
+                    &tx,
+                    &CancellationToken::new(),
+                    &p.pending,
+                    &p.grants,
+                    &access,
+                )
+                .await
+            });
+            let id = loop {
+                match tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                {
+                    EventPayload::ApprovalRequested {
+                        id,
+                        available_decisions,
+                        detail,
+                        ..
+                    } => {
+                        assert_eq!(
+                            available_decisions,
+                            Some(vec![ApprovalDecision::AllowOnce, ApprovalDecision::Deny])
+                        );
+                        assert!(detail.contains("Write-Output safe"));
+                        break id;
+                    }
+                    _ => continue,
+                }
+            };
+            assert!(provider
+                .resolve_approval(&session.id, &id, ApprovalDecision::AllowSession)
+                .await
+                .is_err());
+            provider
+                .resolve_approval(&session.id, &id, ApprovalDecision::AllowOnce)
+                .await
+                .unwrap();
+            assert_eq!(
+                job.await.unwrap()["hookSpecificOutput"]["decision"]["behavior"],
+                "allow"
+            );
+        }
+        let mut readonly = session.clone();
+        readonly.permission_profile = "read_only".into();
+        assert_eq!(
+            guard::decide_with_access(
+                &readonly,
+                value,
+                &tx,
+                &CancellationToken::new(),
+                &provider.pending,
+                &provider.grants,
+                &access
+            )
+            .await["hookSpecificOutput"]["permissionDecision"],
+            "deny"
+        );
+    }
+    let unknown =
+        json!({"hook_event_name":"PreToolUse","tool_name":"mcp__unselected__run","tool_input":{}});
+    assert_eq!(
+        guard::decide_with_access(
+            &session,
+            unknown,
+            &tx,
+            &CancellationToken::new(),
+            &provider.pending,
+            &provider.grants,
+            &access
+        )
+        .await["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(provider.grants.lock().unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn account_skills_are_selected_read_only_and_cannot_install_hooks() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let profile = temp.path().join("profile");
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(profile.join("skills/safe")).unwrap();
+    std::fs::create_dir_all(profile.join("skills/hooks")).unwrap();
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        profile.join("skills/safe/SKILL.md"),
+        "---\nname: safe\ndescription: test\n---\nRead only",
+    )
+    .unwrap();
+    std::fs::write(
+        profile.join("skills/hooks/SKILL.md"),
+        "---\nname: hooks\nhooks:\n  PreToolUse: []\n---\nBlocked",
+    )
+    .unwrap();
+    let mut request = turn(&project);
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    let inventory = access::inventory(&request.account).unwrap();
+    assert_eq!(inventory.skills.len(), 2);
+    assert!(
+        !inventory
+            .skills
+            .iter()
+            .find(|s| s.name == "hooks")
+            .unwrap()
+            .enabled
+    );
+    let selected = access::Access::for_request(&request).unwrap();
+    assert!(selected.guidance().contains("safe"));
+    assert!(!selected.guidance().contains("/hooks/"));
+    std::fs::write(profile.join("bebekon-mcp.json"), "[]").unwrap();
+    assert!(selected
+        .checked_file(
+            temp.path(),
+            &json!({"file_path":profile.join("bebekon-mcp.json")}),
+            "Read"
+        )
+        .is_err());
+    let input = json!({"file_path":profile.join("skills/safe/SKILL.md")});
+    assert!(selected.skill_read(&input, "Read").is_ok());
+    assert!(selected.skill_read(&input, "Write").is_err());
+    assert!(selected
+        .skill_read(
+            &json!({"file_path":profile.join(".credentials.json")}),
+            "Read"
+        )
+        .is_err());
+    request.session.tool_policy = serde_json::to_string(&ToolPolicy {
+        skills: Some(vec![]),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(access::Access::for_request(&request)
+        .unwrap()
+        .skills
+        .is_empty());
+    assert!(access::Access::for_request(&request)
+        .unwrap()
+        .guidance()
+        .is_empty());
+    request.session.tool_policy = "{}".into();
+    request.session.permission_profile = "read_only".into();
+    assert!(access::Access::for_request(&request)
+        .unwrap()
+        .skills
+        .is_empty());
+}
+
 #[test]
 fn streaming_ignores_thinking_children_and_duplicate_final_text() {
     let mut state = mapping::StreamState::new(false);
@@ -176,6 +366,12 @@ async fn installed_cli_accepts_restricted_launch_and_reports_missing_auth() {
     provider.refresh().await;
     provider.ready().unwrap();
     let request = turn(temp.path());
+    std::fs::create_dir_all(temp.path().join("skills/preflight")).unwrap();
+    std::fs::write(
+        temp.path().join("skills/preflight/SKILL.md"),
+        "---\nname: preflight\ndescription: isolated flag check\n---\nDo not execute commands.",
+    )
+    .unwrap();
     assert_eq!(
         provider.auth_status(&request.account).await.unwrap().state,
         "signed_out"
@@ -199,6 +395,9 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
     let temp = crate::test_support::TestDirectory::new().unwrap();
     let provider = fixture_provider();
     let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
     request.prompt = "[WRITE]".into();
     let (tx, mut rx) = mpsc::channel(64);
     let engine = provider.clone();
