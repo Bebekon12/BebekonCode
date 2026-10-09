@@ -25,8 +25,14 @@ Official `codex app-server` over stdio, one process per account (`crates/agent-c
   are normalized in `codex/mapping.rs`.
 - **Approvals.** Command and file-change requests appear in the timeline with command, folder and
   reason: allow once, allow for the session, or deny. Other request types are declined visibly.
-- **Models, plugins, MCP, skills.** `model/list`, `plugin/list`, `mcpServerStatus/list` and
-  `skills/list` per account.
+- **Models, MCP, skills.** `model/list`, `mcpServerStatus/list` and `skills/list` per account.
+- **Plugins.** The documented official CLI `plugin list --available --json`, `plugin add`
+  and `plugin remove` use this account's own `CODEX_HOME`. Marketplace installation is blocked
+  while the account is working and its app-server is restarted after changes. Unity's official
+  marketplace can be connected explicitly. App-server `plugin/*` production methods are not used.
+  Hooks are disabled; desktop/computer-use plugins remain unavailable. Default provider plugins
+  cannot be removed here. External-service authorization and plugin compatibility are not implied
+  by installation. Native Codex sign-in is needed for its authenticated remote catalog.
 - **Usage.** Read with `account/rateLimits/read` without inference and updated by
   `account/rateLimits/updated`. Shown only when Codex reports it; otherwise the account links to ChatGPT usage
   settings. A usage-limit error stops work; switching accounts is a manual user action.

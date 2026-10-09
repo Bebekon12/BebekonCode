@@ -57,7 +57,7 @@ test('public catalog separates Codex skill setup from unavailable plugin install
   await page.getByRole('button', { name: 'Плагины', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Плагины и инструменты' });
   await expect(dialog.locator('.plugin-store-card')).toHaveCount(2);
-  await expect(dialog).toContainText('Навыки Codex можно установить через официальный установщик');
+  await expect(dialog).toContainText('Для установки выберите аккаунт Codex');
   await dialog.getByRole('button', { name: 'Установка Codex', exact: true }).click();
   await expect(
     dialog.getByRole('button', { name: 'Посмотреть доступные навыки', exact: true }),

@@ -32,6 +32,42 @@ async fn plugin_catalog() -> IpcResult<agent_core::catalog::Catalog> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+async fn account_plugins(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<agent_core::codex::plugins::PluginInventory> {
+    state
+        .core
+        .account_plugins(&account_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn change_account_plugin(
+    account_id: String,
+    plugin_id: String,
+    install: bool,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .change_account_plugin(&account_id, &plugin_id, install)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn add_account_plugin_source(
+    account_id: String,
+    source: String,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .add_account_plugin_source(&account_id, &source)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn open_catalog_source(provider: String, app: tauri::AppHandle) -> IpcResult<()> {
     let url = agent_core::catalog::source_url(&provider).map_err(|e| e.to_string())?;
     app.opener()
@@ -676,6 +712,9 @@ fn main() {
             resolve_approval,
             open_usage,
             plugin_catalog,
+            account_plugins,
+            change_account_plugin,
+            add_account_plugin_source,
             open_catalog_source,
             save_settings,
             git_status,

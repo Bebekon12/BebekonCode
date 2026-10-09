@@ -6,6 +6,61 @@ use agent_core::{codex::siwc, model::now, Core, CoreError};
 mod test_support;
 
 #[tokio::test]
+#[ignore = "requires official Codex CLI and public Unity GitHub access; no inference"]
+async fn official_plugins_install_remove_and_stay_inside_the_bound_account() {
+    let temp = test_support::TestDirectory::new().unwrap();
+    let core = Core::open(&temp.path().join("plugins.db")).await.unwrap();
+    let account = core.add_account("openai", "Plugin test").await.unwrap();
+    let other = core.add_account("openai", "Other account").await.unwrap();
+    assert!(core
+        .add_account_plugin_source(&account.id, "unknown")
+        .await
+        .is_err());
+    core.add_account_plugin_source(&account.id, "unity")
+        .await
+        .unwrap();
+    let catalog = core.account_plugins(&account.id).await.unwrap();
+    let unity = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.id == "unity@unity-agent-plugin")
+        .unwrap();
+    assert!(!unity.installed);
+    assert!(core
+        .change_account_plugin(&account.id, "--invalid", true)
+        .await
+        .is_err());
+    core.change_account_plugin(&account.id, &unity.id, true)
+        .await
+        .unwrap();
+    assert!(core
+        .account_plugins(&account.id)
+        .await
+        .unwrap()
+        .entries
+        .iter()
+        .any(|entry| entry.id == unity.id && entry.installed && entry.enabled));
+    assert!(!core
+        .account_plugins(&other.id)
+        .await
+        .unwrap()
+        .entries
+        .iter()
+        .any(|entry| entry.id == unity.id));
+    core.change_account_plugin(&account.id, &unity.id, false)
+        .await
+        .unwrap();
+    assert!(core
+        .account_plugins(&account.id)
+        .await
+        .unwrap()
+        .entries
+        .iter()
+        .all(|entry| !entry.installed));
+    core.shutdown().await;
+}
+
+#[tokio::test]
 #[ignore = "requires official Codex CLI; starts but never completes sign-in"]
 async fn official_codex_login_is_isolated_and_does_not_infer_without_auth() {
     let temp = test_support::TestDirectory::new().unwrap();

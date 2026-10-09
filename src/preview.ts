@@ -62,6 +62,7 @@ const listeners = new Set<(event: AgentEvent) => void>();
 const accountListeners = new Set<(event: AccountEvent) => void>();
 const cancelled = new Set<string>();
 const sandboxReady = new Set<string>();
+const previewPlugins = new Map<string, import('./contracts').ProviderPlugin[]>();
 const approvals = new Map<string, { sessionId: string; resolve: (decision: string) => void }>();
 const now = () => Math.floor(Date.now() / 1000);
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -484,6 +485,35 @@ export const preview: ClientTransport = {
       },
     ],
   }),
+  accountPlugins: async (accountId) => ({
+    entries: structuredClone(previewPlugins.get(accountId) ?? []),
+  }),
+  addAccountPluginSource: async (accountId, source) => {
+    const entries = previewPlugins.get(accountId) ?? [];
+    const names = source === 'unity' ? ['unity'] : ['documents', 'presentations', 'spreadsheets'];
+    for (const name of names)
+      if (!entries.some((entry) => entry.name === name))
+        entries.push({
+          id: `${name}@${source === 'unity' ? 'unity-agent-plugin' : 'openai'}`,
+          name,
+          marketplace: source === 'unity' ? 'unity-agent-plugin' : 'openai',
+          version: 'preview',
+          description: 'Демонстрация плагина · установка в памяти',
+          installed: false,
+          enabled: false,
+          can_remove: false,
+          unavailable_reason: null,
+          auth_policy: 'ON_USE',
+        });
+    previewPlugins.set(accountId, entries);
+  },
+  changeAccountPlugin: async (accountId, pluginId, install) => {
+    const entry = previewPlugins.get(accountId)?.find((entry) => entry.id === pluginId);
+    if (!entry) throw new Error('Плагин не найден');
+    entry.installed = install;
+    entry.enabled = install;
+    entry.can_remove = install;
+  },
   openCatalogSource: async () => {},
   accountExtensions: async (accountId) =>
     state.accounts.find((a) => a.id === accountId)?.provider === 'anthropic'

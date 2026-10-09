@@ -13,6 +13,52 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
 
+## Codex plugin manager and compact interface (0.8.8, checked 2026-10-09)
+
+- The current [app-server reference](https://learn.chatgpt.com/docs/app-server) still says
+  **“Don't call this method from production clients yet”** for `plugin/list`, `plugin/read`,
+  `plugin/install` and `plugin/uninstall`. None are called. This supersedes older inventory
+  descriptions below; their prohibition on these RPC methods still applies.
+- Use only the documented [official CLI commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli):
+  `plugin list --available --json`, `plugin list --json`, `plugin add ID --json`,
+  `plugin remove ID --json`, and the fixed Unity marketplace source. IDs must exactly match
+  the selected account's catalog and pass argument validation. Successful mutations are
+  checked against the installed inventory. Default/admin-managed plugins cannot be removed.
+- All commands run under the app-owned account's `CODEX_HOME`, with an allowlisted environment,
+  native keyring credentials owned by Codex, telemetry/feedback disabled, bounded stdout,
+  hidden windows, timeouts and Windows Job Objects. Raw CLI stderr is never shown or logged.
+  No SIWC token is exported into the plugin command; the remote catalog requires native sign-in.
+  No credential import, account fallback, inference or global Git configuration change.
+  Documented child-only [Git configuration](https://git-scm.com/docs/git-config) enables
+  `core.longpaths` on Windows for deeply nested marketplace paths.
+- The core owns these operations; Tauri only forwards commands. Mutations are serialized
+  against account turns and process creation; busy accounts fail visibly. Only the affected
+  account's app-server is stopped after changes to reload CLI configuration. A new chat is
+  recommended by the [plugin documentation](https://learn.chatgpt.com/docs/plugins).
+- `features.hooks=false` is set for all Codex app-server and plugin CLI launches, using the
+  [documented configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
+  Desktop/computer-use/browser plugins are unavailable and installed matching plugins are
+  disabled at app-server launch. There is no supported generic bridge to the
+  [official computer-use desktop integration](https://learn.chatgpt.com/docs/computer-use).
+  Existing provider sandbox/approval policies remain active; local computer actions still
+  require fresh per-action confirmation and an indicator if a future integration is added.
+- The [official Unity guide](https://docs.unity.com/en-us/ai/unity-plugin/codex) documents
+  `Unity-Technologies/unity-agent-plugin` and `unity@unity-agent-plugin`. Tested installation,
+  inventory, removal and isolation from a second fresh profile with Codex CLI 0.160.1, without
+  sign-in or inference. Read-only discovery in the already bound native account returned
+  6 installed / 5,668 available entries. The UI pages results and validates at most 20,000
+  entries per array / 32 MiB CLI output. Public-source `openai/plugins` cannot be added as a
+  reserved marketplace; the OpenAI button refreshes Codex's own authenticated catalog instead.
+- Original Documents, Presentations and Spreadsheets were absent from that account's CLI
+  catalog. Do not claim their installation or functionality. Catalog availability, tool
+  compatibility and external-service authorization are separate; the manager does not
+  implement app OAuth. Claude marketplace installation remains unavailable in this adapter.
+- Quota/source/reset/error details moved to expandable UI; no values or timestamps are
+  fabricated. The visible **План ChatGPT** link identifies plan usage and opens usage settings;
+  its tooltip retains the full explanation. Attachment constraints and automatic compaction
+  help are available through the adjacent information control. Security warnings and explicit
+  full-access confirmation remain visible.
+
 ## Subscription quota adapters (0.8.7, checked 2026-10-09)
 
 - Re-fetched the [official Codex app-server reference](https://developers.openai.com/codex/app-server/):

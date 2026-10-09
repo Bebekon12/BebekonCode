@@ -79,10 +79,11 @@ export function RunChanges({ source, refreshKey }: { source: ChangeSource; refre
           </li>
         ))}
       </ul>
-      <p className="run-changes-note">
-        Все незафиксированные изменения проекта
-        {summary.untracked.length ? ' · строки новых файлов не подсчитаны' : ''}
-        {count > 5 ? ` · ещё ${count - 5} в окне просмотра` : ''}
+      <p
+        className="run-changes-note"
+        title="Все незафиксированные изменения проекта. Строки новых файлов не подсчитаны."
+      >
+        Рабочие изменения{count > 5 ? ` · ещё ${count - 5} файлов` : ''}
       </p>
     </section>
   );

@@ -25,7 +25,8 @@ test('project tree and separate chat modes stay discoverable without duplicated 
   const answer = await page.locator('.step-message.agent').boundingBox();
   expect(user!.x).toBeGreaterThan(answer!.x + 80);
   expect(user!.x + user!.width).toBeCloseTo(answer!.x + answer!.width, 0);
-  expect(answer!.width).toBeGreaterThan(900);
+  expect(answer!.width).toBeGreaterThan(700);
+  expect(answer!.width).toBeLessThan(900);
   await page.screenshot({ path: 'test-results/workspace-wide-chat.png' });
   await sidebar.getByRole('button', { name: 'Свернуть проект sample-project' }).click();
   await expect(project.locator('.recent-chat')).toHaveCount(0);

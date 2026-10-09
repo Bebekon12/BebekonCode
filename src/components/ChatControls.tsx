@@ -63,14 +63,21 @@ export function ChatControls({
         <button
           className="secondary-button"
           title="Настроить плагины, MCP, навыки и роль"
+          aria-label="Инструменты"
           onClick={settings}
           disabled={disabled}
         >
-          <Puzzle size={14} /> Инструменты
+          <Puzzle size={16} />
         </button>
         {!session.parent_session_id && (
-          <button className="secondary-button" onClick={handoff} disabled={disabled}>
-            <ArrowRightLeft size={14} /> Перейти
+          <button
+            className="secondary-button"
+            title="Передать чат другому агенту"
+            aria-label="Перейти"
+            onClick={handoff}
+            disabled={disabled}
+          >
+            <ArrowRightLeft size={16} />
           </button>
         )}
       </div>

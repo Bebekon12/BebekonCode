@@ -68,6 +68,11 @@ export const desktop: ClientTransport = {
   accountModels: (accountId) => invoke('account_models', { accountId }),
   accountExtensions: (accountId) => invoke('account_extensions', { accountId }),
   pluginCatalog: () => invoke('plugin_catalog'),
+  accountPlugins: (accountId) => invoke('account_plugins', { accountId }),
+  changeAccountPlugin: (accountId, pluginId, install) =>
+    invoke('change_account_plugin', { accountId, pluginId, install }),
+  addAccountPluginSource: (accountId, source) =>
+    invoke('add_account_plugin_source', { accountId, source }),
   openCatalogSource: (provider) => invoke('open_catalog_source', { provider }),
   subscribeAccounts: (onEvent) =>
     listen<AccountEvent>('account-event', (event) => onEvent(event.payload)),

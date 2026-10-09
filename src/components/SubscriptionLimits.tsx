@@ -33,7 +33,7 @@ export function SubscriptionLimits({
           onClick={() => (collapsed ? setPopup(!popup) : setOpen(!open))}
         >
           <Activity size={17} />
-          <span className="sidebar-label">Лимиты подписок</span>
+          <span className="sidebar-label">Лимиты</span>
           <ChevronDown size={13} className="sidebar-label" />
         </button>
         {!collapsed && (
@@ -80,71 +80,77 @@ export function SubscriptionLimits({
                 </div>
                 {s?.state === 'signed_in' ? (
                   <>
-                    {s.usage.map((w, i) => {
-                      const remaining = Math.round(
-                        Math.max(0, Math.min(100, 100 - w.used_percent)),
-                      );
-                      return (
-                        <div
-                          className="limit-window"
-                          key={i}
-                          title={`${resetLabel(w.resets_at)} · проверено ${new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU')}`}
-                        >
-                          <div>
-                            <span>{w.label ?? windowLabel(w.window_minutes)}</span>
-                            <strong>{remaining}% осталось</strong>
+                    {s.usage
+                      .filter((w) => !w.label || [300, 10080].includes(w.window_minutes ?? 0))
+                      .slice(0, 2)
+                      .map((w, i) => {
+                        const remaining = Math.round(
+                          Math.max(0, Math.min(100, 100 - w.used_percent)),
+                        );
+                        return (
+                          <div
+                            className={`limit-window ${remaining === 0 ? 'exhausted' : remaining <= 20 ? 'low' : ''}`}
+                            key={i}
+                            title={`${resetLabel(w.resets_at)} · проверено ${new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU')}`}
+                          >
+                            <div>
+                              <span>{w.label ?? windowLabel(w.window_minutes)}</span>
+                              <strong>{remaining}%</strong>
+                            </div>
+                            <progress
+                              aria-label={`${a.label}: ${w.label ?? windowLabel(w.window_minutes)}, осталось`}
+                              max={100}
+                              value={remaining}
+                            />
                           </div>
-                          <progress
-                            aria-label={`${a.label}: ${w.label ?? windowLabel(w.window_minutes)}, осталось`}
-                            max={100}
-                            value={remaining}
-                          />
-                          <span className="limit-note">{resetLabel(w.resets_at)}</span>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
                     {!s.usage.length && <span className="limit-note">Лимиты недоступны</span>}
-                    {s.usage_error && (
-                      <p className="limit-note limit-stale" title={s.usage_error}>
-                        {s.usage.length > 0 && 'Не удалось обновить · '}
-                        {s.usage_error}
-                      </p>
-                    )}
-                    {a.provider === 'anthropic' && (
-                      <span className="limit-note">Claude SDK · экспериментальный API</span>
-                    )}
-                    {s.usage_detail && (
-                      <details className="limit-cli-detail">
-                        <summary>Статус Claude CLI</summary>
-                        <pre>{s.usage_detail}</pre>
-                      </details>
-                    )}
-                    {s.limit_reached && <span className="field-error">Лимит исчерпан</span>}
-                    {s.usage.length > 0 && (
-                      <span className="limit-note">
-                        Данные на{' '}
-                        {new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    )}
-                    {error && (
-                      <span className="limit-note limit-stale" title={error}>
-                        Не удалось обновить · данные на{' '}
-                        {new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    )}
-                    <button
-                      className="text-button limit-manage"
-                      onClick={() => openUsage(a.provider)}
-                      title="Открыть использование у провайдера"
-                    >
-                      Открыть мои лимиты <ArrowUpRight size={12} />
-                    </button>
+                    <details className="limit-details">
+                      <summary aria-label={`Подробности лимитов ${a.label}`}>
+                        <span>
+                          {s.usage_error || error
+                            ? 'Не обновлено'
+                            : s.limit_reached
+                              ? 'Лимит исчерпан'
+                              : 'Подробнее'}
+                        </span>
+                        <ChevronDown size={12} />
+                      </summary>
+                      <div>
+                        {s.usage.map((w, i) => (
+                          <p key={i}>
+                            <strong>{w.label ?? windowLabel(w.window_minutes)}</strong>
+                            <span>
+                              {Math.round(Math.max(0, 100 - w.used_percent))}% осталось ·{' '}
+                              {resetLabel(w.resets_at)}
+                            </span>
+                          </p>
+                        ))}
+                        {(s.usage_error || error) && (
+                          <p className="field-error">{s.usage_error || error}</p>
+                        )}
+                        {s.usage.length > 0 && (
+                          <p className="muted">
+                            Обновлено{' '}
+                            {new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        )}
+                        {a.provider === 'anthropic' && (
+                          <p className="muted">Claude SDK · экспериментальный API</p>
+                        )}
+                        {s.usage_detail && <pre>{s.usage_detail}</pre>}
+                        <button
+                          className="text-button limit-manage"
+                          onClick={() => openUsage(a.provider)}
+                        >
+                          Открыть у провайдера <ArrowUpRight size={12} />
+                        </button>
+                      </div>
+                    </details>
                   </>
                 ) : (
                   <span className="limit-note">
@@ -160,9 +166,6 @@ export function SubscriptionLimits({
               </div>
             );
           })}
-          {connected.length > 0 && (
-            <span className="limit-note">Официальные данные · вручную и по событиям Codex</span>
-          )}
         </div>
       )}
     </section>

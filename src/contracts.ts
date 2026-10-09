@@ -170,6 +170,21 @@ export interface PluginCatalog {
   errors: string[];
   checked_at: number;
 }
+export interface ProviderPlugin {
+  id: string;
+  name: string;
+  marketplace: string;
+  version: string | null;
+  description: string;
+  installed: boolean;
+  enabled: boolean;
+  can_remove: boolean;
+  unavailable_reason: string | null;
+  auth_policy: string | null;
+}
+export interface PluginInventory {
+  entries: ProviderPlugin[];
+}
 export interface AgentEvent {
   sequence: number;
   session_id: string;
@@ -258,6 +273,9 @@ export interface ClientTransport {
   accountModels(accountId: string): Promise<ModelInfo[]>;
   accountExtensions(accountId: string): Promise<Extensions>;
   pluginCatalog(): Promise<PluginCatalog>;
+  accountPlugins(accountId: string): Promise<PluginInventory>;
+  changeAccountPlugin(accountId: string, pluginId: string, install: boolean): Promise<void>;
+  addAccountPluginSource(accountId: string, source: 'openai' | 'unity'): Promise<void>;
   openCatalogSource(provider: string): Promise<void>;
   subscribeAccounts(onEvent: (event: AccountEvent) => void): Promise<() => void>;
   resolveApproval(sessionId: string, approvalId: string, decision: ApprovalDecision): Promise<void>;

@@ -737,6 +737,44 @@ impl Core {
         self.engine(&account.provider)?.extensions(&account).await
     }
 
+    pub async fn account_plugins(
+        &self,
+        id: &str,
+    ) -> Result<crate::codex::plugins::PluginInventory> {
+        let account = self.account(id).await?;
+        self.engine(&account.provider)?.plugins(&account).await
+    }
+
+    pub async fn change_account_plugin(&self, id: &str, plugin: &str, install: bool) -> Result<()> {
+        self.ensure_account_idle(id).await?;
+        let account = self.account(id).await?;
+        self.engine(&account.provider)?
+            .change_plugin(&account, plugin, install)
+            .await
+    }
+
+    pub async fn add_account_plugin_source(&self, id: &str, source: &str) -> Result<()> {
+        self.ensure_account_idle(id).await?;
+        let account = self.account(id).await?;
+        self.engine(&account.provider)?
+            .add_plugin_source(&account, source)
+            .await
+    }
+
+    async fn ensure_account_idle(&self, id: &str) -> Result<()> {
+        let sessions = self.storage.sessions().await?;
+        let runs = self.runs.lock().map_err(|_| CoreError::Busy)?;
+        if sessions
+            .iter()
+            .any(|s| s.account_profile_id == id && runs.contains_key(&s.id))
+        {
+            return Err(CoreError::Invalid(
+                "Остановите задачи аккаунта перед изменением плагинов".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn account_mcp(&self, id: &str) -> Result<Vec<crate::mcp::LocalMcpServer>> {
         crate::mcp::read(&self.account(id).await?)
     }

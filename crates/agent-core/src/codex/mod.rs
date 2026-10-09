@@ -12,6 +12,7 @@
 
 mod mapping;
 mod native_auth;
+pub mod plugins;
 mod rpc;
 mod sandbox;
 pub mod siwc;
@@ -243,6 +244,15 @@ impl CodexProvider {
         }
         let mut command = std::process::Command::new(&binary);
         command.args(["app-server", "--listen", "stdio://"]);
+        // Desktop-only plugins must never load their skills, helpers or MCP servers here.
+        for entry in plugins::installed(self, account)
+            .await?
+            .entries
+            .into_iter()
+            .filter(|entry| entry.installed && plugins::desktop_only(&entry.name))
+        {
+            command.args(["-c", &format!("plugins.{:?}.enabled=false", entry.id)]);
+        }
         if credentials.is_some() {
             // Provider configuration from the SIWC "Codex app-server" documentation.
             command.args(
@@ -278,6 +288,7 @@ impl CodexProvider {
                     "shell_environment_policy.ignore_default_excludes=false",
                     "sandbox_mode=\"workspace-write\"",
                     "approval_policy=\"on-request\"",
+                    "features.hooks=false",
                 ]
                 .into_iter()
                 .flat_map(|value| ["-c", value]),
@@ -882,6 +893,19 @@ impl AgentProvider for CodexProvider {
         native_auth::login(&self.server(account).await?.peer).await
     }
 
+    async fn plugins(&self, account: &AccountProfile) -> Result<plugins::PluginInventory> {
+        plugins::list(self, account).await
+    }
+
+    async fn change_plugin(&self, account: &AccountProfile, id: &str, install: bool) -> Result<()> {
+        self.plugin_operation(account, Some((id, install)), None)
+            .await
+    }
+
+    async fn add_plugin_source(&self, account: &AccountProfile, source: &str) -> Result<()> {
+        self.plugin_operation(account, None, Some(source)).await
+    }
+
     async fn extensions(&self, account: &AccountProfile) -> Result<Extensions> {
         let server = self.server(account).await?;
         let mut extensions = Extensions::default();
@@ -893,8 +917,24 @@ impl AgentProvider for CodexProvider {
             request("mcpServerStatus/list", json!({})),
             request("skills/list", json!({})),
         );
-        // plugin/list is documented as under development and forbidden for production clients.
-        // Public discovery is implemented separately in catalog.rs; it grants no tool access.
+        // Use the documented CLI, never the production-forbidden app-server plugin/list.
+        match plugins::installed(self, account).await {
+            Ok(inventory) => {
+                extensions.plugins = inventory
+                    .entries
+                    .into_iter()
+                    .filter(|entry| entry.installed)
+                    .map(|entry| ExtensionItem {
+                        id: entry.id,
+                        name: entry.name,
+                        enabled: entry.enabled,
+                        detail: entry.unavailable_reason.clone().or(entry.version),
+                        status: entry.unavailable_reason.map(|_| "unsupported".into()),
+                    })
+                    .collect()
+            }
+            Err(error) => extensions.errors.push(error.to_string()),
+        }
         match mcp {
             Ok(mut value) => {
                 let mut pages = 0;
@@ -1107,6 +1147,42 @@ impl AgentProvider for CodexProvider {
 }
 
 impl CodexProvider {
+    async fn plugin_operation(
+        &self,
+        account: &AccountProfile,
+        change: Option<(&str, bool)>,
+        source: Option<&str>,
+    ) -> Result<()> {
+        // Serializes mutations against app-server creation and account operations.
+        let mut servers = self.servers.lock().await;
+        let server = servers.get(&account.id).cloned();
+        let _operation = if let Some(server) = &server {
+            if server
+                .active
+                .lock()
+                .map(|active| !active.is_empty())
+                .unwrap_or(true)
+            {
+                return Err(CoreError::Busy);
+            }
+            Some(server.operation.try_lock().map_err(|_| CoreError::Busy)?)
+        } else {
+            None
+        };
+        let result = if let Some((id, install)) = change {
+            plugins::change(self, account, id, install).await
+        } else if let Some(source) = source {
+            plugins::add_source(self, account, source).await
+        } else {
+            Err(CoreError::Invalid("Неизвестная операция".into()))
+        };
+        // CLI owns configuration writes. Next app-server reads the new configuration.
+        if let Some(server) = servers.remove(&account.id) {
+            server.stop();
+        }
+        result
+    }
+
     async fn drive_turn(
         &self,
         server: &Arc<AppServer>,

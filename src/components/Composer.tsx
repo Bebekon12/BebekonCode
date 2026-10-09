@@ -1,5 +1,14 @@
 import { forwardRef, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, ArrowUpRight, Square, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
+import {
+  ArrowUp,
+  ArrowUpRight,
+  Square,
+  Paperclip,
+  FileText,
+  X,
+  LoaderCircle,
+  Info,
+} from 'lucide-react';
 import { ImagePreview } from './ImagePreview';
 import type { ExtensionItem } from '../contracts';
 import {
@@ -234,30 +243,39 @@ export const Composer = forwardRef<
           {error}
         </p>
       )}
-      <details className="attachment-help">
-        <summary>Какие файлы можно прикрепить?</summary>
-        <p>
-          Фото: PNG, JPEG, GIF, WebP до 4 МиБ каждое и до 6 МиБ суммарно. DOCX, XLSX и PPTX:
-          извлекаем текст без точного оформления. TXT, код и другие файлы передаются внутри проекта.
-          PDF, видео, аудио и старые Office-файлы можно прикрепить, но их анализ зависит от
-          доступных агенту инструментов. До 8 файлов, 20 МиБ на файл и 40 МиБ суммарно.
-        </p>
-      </details>
       <div className="composer-caption">
-        <span>
-          {demo
-            ? 'Локальный симулятор · для ответов ИИ подключите аккаунт'
-            : 'Контекст сжимается автоматически'}
-          {manageUsage && (
-            <>
-              {' · '}
-              <span className="plan-usage-note">Используется план ChatGPT</span>{' '}
-              <button className="inline-link" onClick={manageUsage}>
-                Управлять использованием <ArrowUpRight size={11} />
-              </button>
-            </>
-          )}
-        </span>
+        <div className="composer-caption-info">
+          <details className="attachment-help composer-help">
+            <summary aria-label="О вложениях и контексте" title="Вложения и контекст">
+              <Info size={14} />
+            </summary>
+            <div className="composer-help-panel">
+              <p>
+                <strong>Вложения</strong>
+                <br />
+                Фото: PNG, JPEG, GIF, WebP до 4 МиБ каждое и до 6 МиБ суммарно. DOCX, XLSX и PPTX:
+                извлекаем текст без точного оформления. TXT, код и другие файлы передаются внутри
+                проекта. PDF, видео, аудио и старые Office-файлы можно прикрепить, но их анализ
+                зависит от доступных агенту инструментов. До 8 файлов, 20 МиБ на файл и 40 МиБ
+                суммарно.
+              </p>
+              <p>Контекст сжимается автоматически по мере заполнения.</p>
+            </div>
+          </details>
+          {demo ? (
+            <span className="muted" title="Локальный симулятор · для ответов ИИ подключите аккаунт">
+              Демо
+            </span>
+          ) : manageUsage ? (
+            <button
+              className="inline-link"
+              onClick={manageUsage}
+              title="Используется план ChatGPT · управлять использованием"
+            >
+              План ChatGPT <ArrowUpRight size={11} />
+            </button>
+          ) : null}
+        </div>
         <span>
           <kbd>Ctrl ↵</kbd> отправить
         </span>

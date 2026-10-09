@@ -10,12 +10,14 @@ export function Dialog({
   children,
   wide = false,
   closeDisabled = false,
+  workspace = false,
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
   wide?: boolean;
   closeDisabled?: boolean;
+  workspace?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Unique per dialog: stacked dialogs must not share a label.
@@ -77,7 +79,7 @@ export function Dialog({
       }}
     >
       <div
-        className={`dialog ${wide ? 'dialog-wide' : ''}`}
+        className={`dialog ${wide ? 'dialog-wide' : ''} ${workspace ? 'dialog-workspace' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

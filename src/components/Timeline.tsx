@@ -691,16 +691,11 @@ function TurnStepView({
             <Sparkles size={13} />
           </span>
           <div>
-            <div className="entry-label">
-              {team ? 'Ответ команды' : providerName}{' '}
-              {!demo && (
-                <span className="muted">
-                  · {model} ·{' '}
-                  {turn.reasoningEffort
-                    ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)`
-                    : 'Уровень по умолчанию CLI'}
-                </span>
-              )}
+            <div
+              className="entry-label"
+              title={`${providerName} · ${model} · ${turn.reasoningEffort ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)` : 'Уровень по умолчанию CLI'}`}
+            >
+              {team ? 'Ответ команды' : providerName}
             </div>
             <div className="prose">
               {turn.text ? (

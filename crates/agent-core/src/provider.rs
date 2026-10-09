@@ -95,6 +95,30 @@ pub trait AgentProvider: Send + Sync {
         Ok(Extensions::default())
     }
 
+    async fn plugins(
+        &self,
+        _account: &AccountProfile,
+    ) -> Result<crate::codex::plugins::PluginInventory> {
+        Err(CoreError::Invalid(
+            "Менеджер плагинов доступен только для Codex".into(),
+        ))
+    }
+    async fn change_plugin(
+        &self,
+        _account: &AccountProfile,
+        _id: &str,
+        _install: bool,
+    ) -> Result<()> {
+        Err(CoreError::Invalid(
+            "Установка плагинов этого провайдера недоступна".into(),
+        ))
+    }
+    async fn add_plugin_source(&self, _account: &AccountProfile, _source: &str) -> Result<()> {
+        Err(CoreError::Invalid(
+            "Подключение каталогов этого провайдера недоступно".into(),
+        ))
+    }
+
     async fn resolve_approval(
         &self,
         _session_id: &str,

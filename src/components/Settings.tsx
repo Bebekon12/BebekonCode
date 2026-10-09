@@ -30,12 +30,6 @@ import { errorText } from '../locale';
 import { planLabel, resetLabel, windowLabel } from '../usage';
 const categories = [
   {
-    id: 'MCP',
-    label: 'MCP-серверы',
-    icon: Puzzle,
-    description: 'Локальные серверы, отдельные аккаунты и подтверждения вызовов.',
-  },
-  {
     id: 'Основные',
     label: 'Основные',
     icon: SlidersHorizontal,
@@ -43,19 +37,19 @@ const categories = [
   },
   {
     id: 'Провайдеры',
-    label: 'Аккаунты и провайдеры',
+    label: 'Аккаунты',
     icon: Cpu,
     description: 'Подключайте CLI и управляйте отдельными аккаунтами.',
   },
   {
     id: 'Лимиты',
-    label: 'Лимиты и использование',
+    label: 'Использование',
     icon: Activity,
     description: 'Доступный остаток подписок и переход к лимитам провайдера.',
   },
   {
     id: 'Разрешения',
-    label: 'Доступ и безопасность',
+    label: 'Разрешения',
     icon: ShieldCheck,
     description: 'Как работают песочница, подтверждения и доступ к проекту.',
   },
@@ -64,6 +58,12 @@ const categories = [
     label: 'Возможности',
     icon: Puzzle,
     description: 'Командная работа, инструменты и доступные расширения.',
+  },
+  {
+    id: 'MCP',
+    label: 'MCP-серверы',
+    icon: Puzzle,
+    description: 'Локальные серверы, отдельные аккаунты и подтверждения вызовов.',
   },
   {
     id: 'О программе и обновления',
@@ -154,6 +154,7 @@ export function Settings({
         if (!installing) close();
       }}
       wide
+      workspace
       closeDisabled={installing}
     >
       <div className="settings-layout settings-redesign">
@@ -162,7 +163,7 @@ export function Settings({
             <Search size={15} />
             <input
               aria-label="Найти раздел настроек"
-              placeholder="Найти раздел…"
+              placeholder="Поиск"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -194,89 +195,87 @@ export function Settings({
             ) && <p className="small muted">Раздел не найден.</p>}
           <div className="settings-local-note">
             <ShieldCheck size={16} />
-            <span>
-              Локальная история
-              <br />
-              <small>На этом компьютере</small>
-            </span>
+            <span>На этом компьютере</span>
           </div>
         </nav>
         <div className="settings-content">
           <header className="settings-section-heading">
-            <span className="settings-eyebrow">BebekonCode · настройки</span>
             <h3>{categories.find((category) => category.id === tab)?.label}</h3>
-            <p>{categories.find((category) => category.id === tab)?.description}</p>
           </header>
           {tab === 'Основные' && (
             <>
               <h4 className="settings-group-title">Внешний вид</h4>
-              <div className="setting-row">
-                <div>
-                  <strong>Оформление</strong>
-                  <p>Выберите удобную тему для работы.</p>
+              <div className="settings-row-group">
+                <div className="setting-row">
+                  <div>
+                    <strong>Оформление</strong>
+                  </div>
+                  <select
+                    aria-label="Тема оформления"
+                    value={appearance.theme}
+                    onChange={(event) =>
+                      appearance.setTheme(event.target.value === 'light' ? 'light' : 'dark')
+                    }
+                  >
+                    <option value="dark">Тёмная</option>
+                    <option value="light">Светлая</option>
+                  </select>
                 </div>
-                <select
-                  aria-label="Тема оформления"
-                  value={appearance.theme}
-                  onChange={(event) =>
-                    appearance.setTheme(event.target.value === 'light' ? 'light' : 'dark')
-                  }
-                >
-                  <option value="dark">Тёмная</option>
-                  <option value="light">Светлая</option>
-                </select>
+                <div className="setting-row">
+                  <div>
+                    <strong>Размер текста</strong>
+                    <p>Размер текста в чате.</p>
+                  </div>
+                  <select
+                    aria-label="Размер текста"
+                    value={appearance.textSize}
+                    onChange={(event) =>
+                      appearance.setTextSize(
+                        event.target.value === 'large' ? 'large' : 'comfortable',
+                      )
+                    }
+                  >
+                    <option value="comfortable">Комфортный</option>
+                    <option value="large">Крупный</option>
+                  </select>
+                </div>
               </div>
-              <div className="setting-row">
-                <div>
-                  <strong>Размер текста</strong>
-                  <p>Текст переписки и элементы интерфейса.</p>
+              <h4 className="settings-group-title">Приложение</h4>
+              <div className="settings-row-group">
+                <div className="setting-row">
+                  <div>
+                    <strong>Проверять обновления при запуске</strong>
+                    <p>Установка — после подтверждения.</p>
+                  </div>
+                  <input
+                    role="switch"
+                    aria-label="Проверять обновления при запуске"
+                    type="checkbox"
+                    checked={settings.check_updates_on_start}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const next = { check_updates_on_start: event.target.checked };
+                      void run(async () => {
+                        await client.saveSettings(next);
+                        updateSettings(next);
+                      });
+                    }}
+                  />
                 </div>
-                <select
-                  aria-label="Размер текста"
-                  value={appearance.textSize}
-                  onChange={(event) =>
-                    appearance.setTextSize(event.target.value === 'large' ? 'large' : 'comfortable')
-                  }
-                >
-                  <option value="comfortable">Комфортный</option>
-                  <option value="large">Крупный</option>
-                </select>
-              </div>
-              <h4 className="settings-group-title">Обновления и хранение</h4>
-              <div className="setting-row">
-                <div>
-                  <strong>Проверять обновления при запуске</strong>
-                  <p>
-                    Проверка новых версий при запуске. Установка внутри приложения по подтверждению.
-                  </p>
+                <div className="setting-row">
+                  <div>
+                    <strong>Проекты и история</strong>
+                    <p>Хранятся локально.</p>
+                  </div>
+                  <ShieldCheck size={19} />
                 </div>
-                <input
-                  aria-label="Проверять обновления при запуске"
-                  type="checkbox"
-                  checked={settings.check_updates_on_start}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const next = { check_updates_on_start: event.target.checked };
-                    void run(async () => {
-                      await client.saveSettings(next);
-                      updateSettings(next);
-                    });
-                  }}
-                />
-              </div>
-              <div className="setting-row">
-                <div>
-                  <strong>Проекты и история</strong>
-                  <p>Хранятся на этом компьютере. Телеметрия и удалённый сервер отключены.</p>
-                </div>
-                <ShieldCheck size={19} />
               </div>
             </>
           )}
           {tab === 'Лимиты' && (
             <>
               <div className="row-between settings-limit-toolbar">
-                <span className="small muted">Обновление по запросу и событиям CLI</span>
+                <span className="small muted">Остаток подписки</span>
                 <button
                   className="secondary-button"
                   disabled={busy || !accounts.some((a) => a.provider !== 'mock')}
@@ -488,64 +487,74 @@ export function Settings({
           )}
           {tab === 'Разрешения' && (
             <>
-              <p className="muted">
-                Профиль выбирается для отдельного чата или участника команды. По умолчанию работают
-                песочница и подтверждения провайдера.
-              </p>
-              <div className="provider-card">
-                <strong>По правилам провайдера</strong>
-                <p>
-                  Claude спрашивает перед изменением файлов. Codex выполняет разрешённые команды и
-                  правки в песочнице автоматически; отдельное подтверждение каждой правки Codex в
-                  этой версии недоступно.
-                </p>
-                <p>
-                  Команды shell и MCP у Claude на Windows работают без песочницы ОС и требуют
-                  подтверждения каждого вызова, включая режим «Авто в проекте».
-                </p>
+              <p className="muted">Доступ выбирается отдельно для каждого чата.</p>
+              <div className="settings-row-group">
+                <div className="setting-row">
+                  <div>
+                    <strong>По правилам провайдера</strong>
+                    <p>
+                      Песочница Codex и подтверждения дополнительного доступа. Claude спрашивает
+                      перед правками.
+                    </p>
+                  </div>
+                  <ShieldCheck size={18} />
+                </div>
+                <div className="setting-row">
+                  <div>
+                    <strong>Только чтение</strong>
+                    <p>Без изменения файлов. Используется для проверки работы участников.</p>
+                  </div>
+                </div>
+                <div className="setting-row">
+                  <div>
+                    <strong>Авто в проекте</strong>
+                    <p>
+                      Правки проекта разрешены. Shell и MCP Claude в Windows требуют подтверждения
+                      каждого вызова; песочницы ОС у Claude нет.
+                    </p>
+                  </div>
+                </div>
+                <div className="setting-row">
+                  <div>
+                    <strong>Полный доступ · Codex</strong>
+                    <p>
+                      Без песочницы и подтверждений команд. Включается в отдельном чате после
+                      предупреждения. Проверки и автоматические рабочие сессии остаются в
+                      ограниченном режиме.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="provider-card">
-                <strong>Только чтение</strong>
-                <p>
-                  Файлы защищены от записи. Codex может выполнять команды в песочнице только для
-                  чтения. Повторная проверка участников команды всегда проходит в этом режиме.
+              <details className="settings-policy-details">
+                <summary>Защита данных и управление компьютером</summary>
+                <p className="small muted">
+                  Учётные данные запрещены в любом режиме. Экран, мышь и клавиатура требуют
+                  отдельного подтверждения каждого действия и видимого индикатора. Computer Use пока
+                  недоступен.
                 </p>
-              </div>
-              <div className="notice">
-                «Авто в проекте»: Claude принимает правки проекта автоматически, Codex выполняет
-                команды и правки в песочнице. Для Codex на Windows сначала настройте песочницу в
-                разделе «Аккаунты». Дополнительный доступ требует подтверждения. Разрешение на
-                контекст относится к запросу одного агента, а не ко всей команде.
-              </div>
-              <div className="provider-card">
-                <strong>Полный доступ · только Codex</strong>
-                <p>
-                  Включается явно в отдельном чате после видимого предупреждения. Codex получает
-                  доступ без песочницы и подтверждений команд. Режим недоступен для повторной
-                  проверки и автоматических рабочих сессий. Учётные данные остаются запрещены.
-                </p>
-              </div>
+              </details>
             </>
           )}
           {tab === 'MCP' && <McpSettings client={client} accounts={accounts} />}
           {tab === 'Возможности' && (
             <>
               <div className="provider-card">
-                <strong>Делегирование между агентами</strong>
-                <p>
-                  Команда: до трёх участников, общий итог от координатора. Раунд взаимной проверки
-                  на чтение проходит при двух и более участниках; одного участника проверяет
-                  координатор. При подключённых ChatGPT и Claude по умолчанию Codex координирует и
-                  запускает проверки, Claude анализирует и правит код. Авторазбиение: до четырёх
-                  подзадач на чтение. Модели, аккаунты и доступ выбираете вы.
-                </p>
+                <strong>Команда агентов</strong>
+                <p>До трёх участников, взаимная проверка и общий ответ координатора.</p>
+                <details>
+                  <summary>Авторазбиение и проверка</summary>
+                  <p>
+                    До четырёх подзадач на чтение. Модели, аккаунты и доступ выбираете вы;
+                    результаты проверяются в режиме «Только чтение».
+                  </p>
+                </details>
               </div>
               <div className="provider-card">
                 <strong>Навыки Codex и вложения</strong>
                 <p>
-                  В разделе «Плагины → Установка Codex» можно подготовить запрос официальному
-                  skill-installer. Для плагинов OpenAI API установки пока недоступен. Прикреплённые
-                  изображения открываются по нажатию до отправки и в истории чата.
+                  Плагины Codex устанавливаются в разделе «Плагины» через официальный CLI. Навыки
+                  доступны через skill-installer. Прикреплённые изображения открываются по нажатию
+                  до отправки и в истории чата.
                 </p>
               </div>
               <div className="provider-card">
@@ -568,8 +577,8 @@ export function Settings({
               </div>
               <p className="muted">{product.description}</p>
               <div className="notice">
-                Подключены официальные Codex app-server и Claude Code CLI. Для Claude в Windows
-                доступны файлы проекта; оболочка и расширения пока недоступны.
+                Codex и Claude работают через официальные CLI. История и настройки хранятся на этом
+                компьютере.
               </div>
               <UpdatePanel
                 client={client}
