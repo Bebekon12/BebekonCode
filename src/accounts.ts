@@ -49,6 +49,7 @@ export function mergeUsageUpdate(
     limit_reached: fresh ? update.limit_reached : previous.limit_reached,
     checked_at: fresh ? update.checked_at : previous.checked_at,
     usage_detail: update.usage_detail ?? previous.usage_detail,
+    usage_error: fresh ? null : previous.usage_error,
   };
 }
 

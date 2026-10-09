@@ -162,6 +162,10 @@ pub struct AccountStatus {
     pub sandbox: Option<SandboxStatus>,
     #[serde(default)]
     pub usage_detail: Option<String>,
+    #[serde(default)]
+    pub usage_error: Option<String>,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
     pub account_id: String,
     /// `signed_in`, `signed_out`, `not_required`, `unavailable` or `error`.
     pub state: String,
@@ -187,6 +191,8 @@ pub struct SandboxStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UsageWindow {
+    #[serde(default)]
+    pub label: Option<String>,
     pub window_minutes: Option<i64>,
     pub used_percent: f64,
     pub resets_at: Option<i64>,

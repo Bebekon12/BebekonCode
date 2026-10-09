@@ -13,6 +13,44 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
 
+## Subscription quota adapters (0.8.7, checked 2026-10-09)
+
+- Re-fetched the [official Codex app-server reference](https://developers.openai.com/codex/app-server/):
+  `account/rateLimits/read` returns `rateLimits` and optional `rateLimitsByLimitId`;
+  `account/rateLimits/updated` supplies updates. Read quotas on the account's own stdio peer,
+  without starting a turn. Preserve the documented SIWC `ACCESS_TOKEN` provider setup;
+  quota support for that authorization is not guaranteed. Server errors remain visible;
+  never change login mode or copy official-client credentials to obtain quotas.
+- An explicit **Sign in through Codex** button selects official `account/login/start`
+  with `type: chatgpt`, in this account's `CODEX_HOME`. This is an additional documented
+  login mode, not token import. `account/read` supplies identity; Codex owns refresh/logout
+  and stores credentials in its OS keyring (`cli_auth_credentials_store: keyring`).
+  A nonsecret per-profile mode marker prevents silent fallback to the older SIWC registration.
+  Active account processes block switching. SIWC credentials are neither copied nor passed
+  to the native-auth process. Native quotas still depend on the server response.
+- Re-fetched the [Claude SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript)
+  and inspected Anthropic's published `@anthropic-ai/claude-agent-sdk` **0.3.295** `sdk.d.ts`.
+  The reference page omits the experimental usage method, but the official package documents
+  `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({skipBehaviors: true})` and
+  `SDKControlGetUsageResponse`: subscription type, applicability, five-hour, weekly and
+  model-scoped utilization (0–100) with ISO reset timestamps. Use that public SDK method,
+  never its internal control protocol or consumer endpoint. The version is pinned.
+- The Rust-owned helper uses the separately bound `CLAUDE_CONFIG_DIR` and detected official
+  CLI, an empty streaming input (no prompt), restricted mode, no tools/MCP/plugins/hooks,
+  no setting sources and no session persistence. Skip transcript behavior scanning. Reject
+  results showing model usage or nonzero API cost/duration. Kill the owned process tree on
+  timeout. Only allowlisted quota fields reach the UI; no raw SDK errors or credentials.
+- Live check of the owner's bound Claude Pro account returned five-hour utilization 100%
+  and weekly utilization 26%, with reset timestamps and zero session API cost/duration/model
+  usage. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks this official quota read, so only
+  the quota helper replaces it with documented `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`
+  and `DISABLE_AUTOUPDATER`. Other Claude processes retain their existing environment policy.
+- The embedded SDK helper requires local Node.js 18+. Missing runtime, unsupported CLI/API,
+  null windows and SDK failures are explicit unavailable states. The adapter is experimental,
+  does not promise quotas for every subscription, and never infers quota from token counts.
+  This supersedes the older Claude text-only `/usage` quota path and the claim that Codex has
+  no documented percentage API. Manual refresh and account-bound notifications remain local.
+
 ## Windows sandbox and approvals (0.8.1, checked 2026-10-09)
 
 Official references: [agent approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security),

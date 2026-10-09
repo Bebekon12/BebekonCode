@@ -47,4 +47,16 @@ describe('account quota events and refresh races', () => {
       50,
     );
   });
+  it('keeps quota errors visible with the old snapshot and clears them on a fresh account event', () => {
+    const failed = mergeStatusSnapshot(status, {
+      ...status,
+      usage: [],
+      checked_at: 20,
+      usage_error: 'API unavailable',
+    });
+    expect(failed.usage).toEqual(status.usage);
+    expect(failed.checked_at).toBe(10);
+    expect(failed.usage_error).toBe('API unavailable');
+    expect(mergeUsageUpdate(failed, { ...status, checked_at: 21 }).usage_error).toBeNull();
+  });
 });

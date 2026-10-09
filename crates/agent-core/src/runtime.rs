@@ -699,6 +699,24 @@ impl Core {
         let account = self.account(id).await?;
         self.engine(&account.provider)?.login(&account).await
     }
+    pub async fn account_login_for_usage(&self, id: &str) -> Result<LoginStart> {
+        let account = self.account(id).await?;
+        let sessions = self.storage.sessions().await?;
+        {
+            let active = self.runs.lock().map_err(|_| CoreError::Busy)?;
+            if sessions
+                .iter()
+                .any(|s| s.account_profile_id == id && active.contains_key(&s.id))
+            {
+                return Err(CoreError::Invalid(
+                    "Остановите задачи аккаунта перед сменой способа входа".into(),
+                ));
+            }
+        }
+        self.engine(&account.provider)?
+            .login_for_usage(&account)
+            .await
+    }
     pub async fn setup_sandbox(&self, id: &str) -> Result<SandboxStatus> {
         let account = self.account(id).await?;
         self.engine(&account.provider)?

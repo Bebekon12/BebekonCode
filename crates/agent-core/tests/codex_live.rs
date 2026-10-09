@@ -6,6 +6,30 @@ use agent_core::{codex::siwc, model::now, Core, CoreError};
 mod test_support;
 
 #[tokio::test]
+#[ignore = "requires official Codex CLI; starts but never completes sign-in"]
+async fn official_codex_login_is_isolated_and_does_not_infer_without_auth() {
+    let temp = test_support::TestDirectory::new().unwrap();
+    let core = Core::open(&temp.path().join("native.db")).await.unwrap();
+    let account = core
+        .add_account("openai", "Native quota check")
+        .await
+        .unwrap();
+    let login = core.account_login_for_usage(&account.id).await.unwrap();
+    assert!(
+        login.url.starts_with("https://auth.openai.com/")
+            || login.url.starts_with("https://chatgpt.com/")
+    );
+    let status = core.account_status(&account.id).await.unwrap();
+    assert_eq!(status.state, "signed_out");
+    assert!(status.usage.is_empty());
+    assert!(!std::path::Path::new(account.config_dir.as_ref().unwrap())
+        .join("auth.json")
+        .exists());
+    core.account_logout(&account.id).await.unwrap();
+    core.shutdown().await;
+}
+
+#[tokio::test]
 #[ignore = "requires the official Codex CLI on PATH"]
 async fn sign_in_with_chatgpt_profile_and_documented_app_server_configuration() {
     let temp = test_support::TestDirectory::new().expect("temp");

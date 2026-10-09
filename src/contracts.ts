@@ -104,6 +104,7 @@ export type EventPayload =
   | { type: 'provider_error'; message: string; kind?: string | null };
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny';
 export interface UsageWindow {
+  label?: string | null;
   window_minutes: number | null;
   used_percent: number;
   resets_at: number | null;
@@ -112,6 +113,8 @@ export interface UsageWindow {
 export interface AccountStatus {
   sandbox?: SandboxStatus | null;
   usage_detail?: string | null;
+  usage_error?: string | null;
+  auth_mode?: string | null;
   account_id: string;
   state: 'signed_in' | 'signed_out' | 'not_required' | 'unavailable' | 'error';
   email: string | null;
@@ -250,7 +253,7 @@ export interface ClientTransport {
   removeAccount(accountId: string): Promise<void>;
   accountStatus(accountId: string): Promise<AccountStatus>;
   setupSandbox(accountId: string): Promise<SandboxStatus>;
-  accountLogin(accountId: string): Promise<void>;
+  accountLogin(accountId: string, forUsage?: boolean): Promise<void>;
   accountLogout(accountId: string): Promise<void>;
   accountModels(accountId: string): Promise<ModelInfo[]>;
   accountExtensions(accountId: string): Promise<Extensions>;

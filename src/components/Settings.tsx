@@ -315,7 +315,7 @@ export function Settings({
                             {status.usage.map((window, index) => (
                               <div className="settings-usage-window" key={index}>
                                 <div className="row-between">
-                                  <span>{windowLabel(window.window_minutes)}</span>
+                                  <span>{window.label ?? windowLabel(window.window_minutes)}</span>
                                   <strong>
                                     {Math.round(Math.max(0, 100 - window.used_percent))}% осталось
                                   </strong>
@@ -323,16 +323,22 @@ export function Settings({
                                 <progress
                                   max={100}
                                   value={Math.max(0, 100 - window.used_percent)}
-                                  aria-label={`${account.label}: ${windowLabel(window.window_minutes)}, осталось`}
+                                  aria-label={`${account.label}: ${window.label ?? windowLabel(window.window_minutes)}, осталось`}
                                 />
                                 <small className="muted">{resetLabel(window.resets_at)}</small>
                               </div>
                             ))}
                             {!status.usage.length && (
                               <p className="muted">
-                                {account.provider === 'openai'
-                                  ? 'Для входа через Sign in with ChatGPT API процентов лимита не документирован. Ваши лимиты доступны в настройках ChatGPT.'
-                                  : 'Claude CLI не передал проценты лимитов. Проверьте остаток на странице использования Claude.'}
+                                Лимиты недоступны: провайдер не передал проценты.
+                              </p>
+                            )}
+                            {status.usage_error && (
+                              <p className="notice error">{status.usage_error}</p>
+                            )}
+                            {account.provider === 'anthropic' && (
+                              <p className="small muted">
+                                Claude SDK · экспериментальный API, требуется Node.js 18+.
                               </p>
                             )}
                             {status.limit_reached && (

@@ -41,11 +41,11 @@ export function UsageBars({ usage, compact }: { usage: UsageWindow[]; compact?: 
     <div className={`usage-bars ${compact ? 'compact' : ''}`}>
       {usage.map((window, index) => (
         <div className="usage-row" key={`${window.window_minutes}-${index}`}>
-          <span className="usage-name">{windowLabel(window.window_minutes)}</span>
+          <span className="usage-name">{window.label ?? windowLabel(window.window_minutes)}</span>
           <span
             className={`usage-track ${usageTone(window)}`}
             role="meter"
-            aria-label={`${windowLabel(window.window_minutes)}: использовано ${Math.round(window.used_percent)}%`}
+            aria-label={`${window.label ?? windowLabel(window.window_minutes)}: использовано ${Math.round(window.used_percent)}%`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(window.used_percent)}
@@ -228,6 +228,13 @@ function AccountCard({
             </p>
           )}
           {status.credits && <p className="muted small">Кредиты: {status.credits}</p>}
+          {status.usage_error && <p className="notice warning-notice">{status.usage_error}</p>}
+          {account.provider === 'openai' && status.auth_mode === 'siwc' && (
+            <p className="small muted">
+              Для лимитов можно войти через официальный Codex. Способ подключения этого профиля
+              сменится; выберите тот же аккаунт ChatGPT в браузере.
+            </p>
+          )}
           {status.message && (
             <details className="small muted">
               <summary>Сведения аккаунта</summary>
@@ -297,7 +304,9 @@ function AccountCard({
         <p className="muted small">
           {account.provider === 'anthropic'
             ? 'Завершите штатный вход Claude Code в браузере. BebekonCode не получает пароль или токены. Если страница не открылась, используйте claude auth login с CLAUDE_CONFIG_DIR, указанным ниже.'
-            : 'Завершите вход на открывшейся странице OpenAI в браузере. Пароль вводится только там; BebekonCode хранит выданные токены зашифрованными (Windows DPAPI) и передаёт их только процессу Codex этого аккаунта.'}
+            : status?.auth_mode === 'codex'
+              ? 'Завершите официальный вход Codex в браузере. Выберите тот же аккаунт ChatGPT; учётные данные хранит CLI в защищённом хранилище ОС.'
+              : 'Завершите вход на открывшейся странице OpenAI в браузере. Пароль вводится только там; BebekonCode хранит выданные токены зашифрованными (Windows DPAPI) и передаёт их только процессу Codex этого аккаунта.'}
         </p>
       )}
       {account.provider === 'anthropic' && account.config_dir && (
@@ -316,6 +325,29 @@ function AccountCard({
       )}
 
       <div className="account-actions">
+        {account.provider === 'openai' &&
+          status?.auth_mode !== 'codex' &&
+          (!signedIn || status?.usage_error) && (
+            <button
+              className="secondary-button"
+              title="Отдельный вход ChatGPT через официальный Codex в профиль этого аккаунта. Текущий способ подключения сменится; выберите тот же аккаунт в браузере."
+              disabled={busy || signingIn || status?.state === 'unavailable'}
+              onClick={() =>
+                void run(async () => {
+                  state.markSigningIn(account.id, true);
+                  try {
+                    await client.accountLogin(account.id, true);
+                    await state.refresh(account.id);
+                  } catch (error) {
+                    state.markSigningIn(account.id, false);
+                    throw error;
+                  }
+                })
+              }
+            >
+              <LogIn size={14} /> Войти через Codex для лимитов
+            </button>
+          )}
         {!signedIn && (
           <button
             className="primary-button"
@@ -333,7 +365,11 @@ function AccountCard({
             }
           >
             <LogIn size={14} />{' '}
-            {account.provider === 'anthropic' ? 'Войти через Claude Code' : 'Continue with ChatGPT'}
+            {account.provider === 'anthropic'
+              ? 'Войти через Claude Code'
+              : status?.auth_mode === 'codex'
+                ? 'Войти через Codex'
+                : 'Continue with ChatGPT'}
           </button>
         )}
         <button

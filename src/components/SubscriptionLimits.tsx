@@ -91,28 +91,27 @@ export function SubscriptionLimits({
                           title={`${resetLabel(w.resets_at)} · проверено ${new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU')}`}
                         >
                           <div>
-                            <span>{windowLabel(w.window_minutes)}</span>
+                            <span>{w.label ?? windowLabel(w.window_minutes)}</span>
                             <strong>{remaining}% осталось</strong>
                           </div>
                           <progress
-                            aria-label={`${a.label}: ${windowLabel(w.window_minutes)}, осталось`}
+                            aria-label={`${a.label}: ${w.label ?? windowLabel(w.window_minutes)}, осталось`}
                             max={100}
                             value={remaining}
                           />
+                          <span className="limit-note">{resetLabel(w.resets_at)}</span>
                         </div>
                       );
                     })}
-                    {!s.usage.length && (
-                      <span className="limit-note">
-                        {a.provider === 'anthropic'
-                          ? 'Проценты не получены от Claude CLI'
-                          : 'Проценты для этого подключения недоступны'}
-                      </span>
-                    )}
-                    {!s.usage.length && s.message && (
-                      <p className="limit-note" title={s.message}>
-                        {s.message}
+                    {!s.usage.length && <span className="limit-note">Лимиты недоступны</span>}
+                    {s.usage_error && (
+                      <p className="limit-note limit-stale" title={s.usage_error}>
+                        {s.usage.length > 0 && 'Не удалось обновить · '}
+                        {s.usage_error}
                       </p>
+                    )}
+                    {a.provider === 'anthropic' && (
+                      <span className="limit-note">Claude SDK · экспериментальный API</span>
                     )}
                     {s.usage_detail && (
                       <details className="limit-cli-detail">
@@ -162,7 +161,7 @@ export function SubscriptionLimits({
             );
           })}
           {connected.length > 0 && (
-            <span className="limit-note">Данные официального CLI · обновление вручную</span>
+            <span className="limit-note">Официальные данные · вручную и по событиям Codex</span>
           )}
         </div>
       )}

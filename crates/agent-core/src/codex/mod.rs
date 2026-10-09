@@ -4,13 +4,14 @@
 //! * Sign-in follows OpenAI's documented "Sign in with ChatGPT" flow for open-source, locally
 //!   hosted apps (`siwc`): one dynamic client registration per account, tokens protected per
 //!   account and passed only to that account's app-server as `ACCESS_TOKEN`, exactly as the
-//!   "Codex app-server" page of that documentation describes. Codex's own login and the
-//!   internal externally-managed token mode are not used.
+//!   "Codex app-server" page of that documentation describes. Users may explicitly choose
+//!   official Codex ChatGPT login for quota access; CLI owns its per-home keyring credentials.
 //! * Each account runs its own app-server with its own `CODEX_HOME`.
-//! * Sandbox and approvals stay enabled. No bypass flags, no `danger-full-access`.
+//! * Sandbox and approvals stay enabled by default; full access is an explicit chat choice.
 //! * Usage limits are displayed as reported. Nothing switches accounts automatically.
 
 mod mapping;
+mod native_auth;
 mod rpc;
 mod sandbox;
 pub mod siwc;
@@ -181,10 +182,17 @@ impl CodexProvider {
     }
 
     async fn server(&self, account: &AccountProfile) -> Result<Arc<AppServer>> {
-        let credentials = self.credentials(account).await?;
         let mut servers = self.servers.lock().await;
+        let native = native_auth::selected(account)?;
+        let credentials = if native {
+            None
+        } else {
+            Some(self.credentials(account).await?)
+        };
         if let Some(server) = servers.get(&account.id) {
-            let fresh = server.token_expires_at.is_some_and(|at| at - 300 > now());
+            let fresh = server
+                .token_expires_at
+                .map_or(native, |at| at - 300 > now());
             let busy = server
                 .active
                 .lock()
@@ -197,7 +205,7 @@ impl CodexProvider {
             // Documented renewal: restart with the new token, then resume threads by id.
             server.stop();
         }
-        let server = self.spawn(account, &credentials).await?;
+        let server = self.spawn(account, credentials.as_ref()).await?;
         servers.insert(account.id.clone(), Arc::clone(&server));
         Ok(server)
     }
@@ -205,7 +213,7 @@ impl CodexProvider {
     async fn spawn(
         &self,
         account: &AccountProfile,
-        credentials: &siwc::Credentials,
+        credentials: Option<&siwc::Credentials>,
     ) -> Result<Arc<AppServer>> {
         let detection = self.detection();
         let binary = detection.binary.ok_or_else(|| CoreError::Provider {
@@ -220,25 +228,24 @@ impl CodexProvider {
             .ok_or_else(|| CoreError::Invalid("У аккаунта нет папки профиля".into()))?;
         std::fs::create_dir_all(&home)?;
 
-        let token = credentials
-            .access_token
-            .clone()
-            .ok_or_else(siwc::signed_out)?;
-        let mut extra = vec![
-            ("CODEX_HOME", OsString::from(&home)),
-            // Documented SIWC hand-off: only this account's process receives its token.
-            ("ACCESS_TOKEN", OsString::from(token)),
-        ];
+        let mut extra = vec![("CODEX_HOME", OsString::from(&home))];
+        if let Some(credentials) = credentials {
+            let token = credentials
+                .access_token
+                .clone()
+                .ok_or_else(siwc::signed_out)?;
+            extra.push(("ACCESS_TOKEN", OsString::from(token)));
+        }
         if let Some(root) = &detection.managed_root {
             // Mirrors the official npm launcher, which we bypass only to avoid extra processes.
             extra.push(("CODEX_MANAGED_BY_NPM", OsString::from("1")));
             extra.push(("CODEX_MANAGED_PACKAGE_ROOT", OsString::from(root)));
         }
         let mut command = std::process::Command::new(&binary);
-        command
-            .args(["app-server", "--listen", "stdio://"])
+        command.args(["app-server", "--listen", "stdio://"]);
+        if credentials.is_some() {
             // Provider configuration from the SIWC "Codex app-server" documentation.
-            .args(
+            command.args(
                 [
                     "model_provider=\"openai_chatgpt_plan\"",
                     "model_providers.openai_chatgpt_plan.name=\"ChatGPT plan\"",
@@ -247,6 +254,24 @@ impl CodexProvider {
                     "model_providers.openai_chatgpt_plan.wire_api=\"responses\"",
                     "model_providers.openai_chatgpt_plan.requires_openai_auth=false",
                     "model_providers.openai_chatgpt_plan.supports_websockets=false",
+                ]
+                .into_iter()
+                .flat_map(|value| ["-c", value]),
+            );
+        } else {
+            command.args(
+                [
+                    "model_provider=\"openai\"",
+                    "forced_login_method=\"chatgpt\"",
+                    "cli_auth_credentials_store=\"keyring\"",
+                ]
+                .into_iter()
+                .flat_map(|value| ["-c", value]),
+            );
+        }
+        command
+            .args(
+                [
                     "shell_environment_policy.inherit=\"core\"",
                     "shell_environment_policy.ignore_default_excludes=false",
                     "sandbox_mode=\"workspace-write\"",
@@ -311,7 +336,7 @@ impl CodexProvider {
             child: Mutex::new(Some(child)),
             group: Mutex::new(group),
             active: Mutex::default(),
-            token_expires_at: credentials.expires_at,
+            token_expires_at: credentials.and_then(|c| c.expires_at),
             loaded: Mutex::default(),
             stderr: tail,
         });
@@ -701,6 +726,17 @@ impl AgentProvider for CodexProvider {
             status.message = Some("Codex CLI не найден".into());
             return Ok(status);
         }
+        if native_auth::selected(account)? {
+            status.auth_mode = Some("codex".into());
+            let server = self.server(account).await?;
+            native_auth::read(&server.peer, &mut status).await?;
+            if status.state == "signed_in" {
+                read_rate_limits(&server.peer, &mut status).await;
+                status.sandbox = Some(sandbox::readiness(&server).await);
+            }
+            return Ok(status);
+        }
+        status.auth_mode = Some("siwc".into());
         let pending = self
             .logins
             .lock()
@@ -722,18 +758,16 @@ impl AgentProvider for CodexProvider {
         }
         status.state = "signed_in".into();
         status.plan_usage_enabled = Some(credentials.plan_enabled());
-        status.message = Some(if credentials.plan_enabled() {
-            "Sign in with ChatGPT не предоставляет документированный API процентов лимита. Посмотрите свои лимиты в ChatGPT → Настройки → Использование.".into()
-        } else {
-            "Вход выполнен, но использование плана ChatGPT не разрешено.".into()
-        });
+        status.message = (!credentials.plan_enabled())
+            .then(|| "Вход выполнен, но использование плана ChatGPT не разрешено.".into());
         if credentials.plan_enabled() {
             match self.server(account).await {
                 Ok(server) => {
+                    read_rate_limits(&server.peer, &mut status).await;
                     status.sandbox = Some(sandbox::readiness(&server).await);
                 }
                 Err(_) => {
-                    status.message =
+                    status.usage_error =
                         Some("Вход выполнен. CLI пока недоступен для проверки лимитов.".into())
                 }
             }
@@ -742,6 +776,9 @@ impl AgentProvider for CodexProvider {
     }
 
     async fn login(&self, account: &AccountProfile) -> Result<LoginStart> {
+        if native_auth::selected(account)? {
+            return native_auth::login(&self.server(account).await?.peer).await;
+        }
         let profile = Self::profile(account)?;
         std::fs::create_dir_all(&profile)?;
         let provider_dir = profile
@@ -786,6 +823,15 @@ impl AgentProvider for CodexProvider {
     }
 
     async fn logout(&self, account: &AccountProfile) -> Result<()> {
+        if native_auth::selected(account)? {
+            let server = self.server(account).await?;
+            server
+                .peer
+                .request("account/logout", Value::Null, REQUEST_TIMEOUT)
+                .await
+                .map_err(|e| provider_error(e, None))?;
+            self.release_account(account).await;
+        }
         self.release_account(account).await;
         let profile = Self::profile(account)?;
         let lock = self.auth_lock(&account.id);
@@ -805,6 +851,33 @@ impl AgentProvider for CodexProvider {
             });
         }
         Ok(())
+    }
+
+    async fn login_for_usage(&self, account: &AccountProfile) -> Result<LoginStart> {
+        let mut servers = self.servers.lock().await;
+        if let Some(server) = servers.get(&account.id) {
+            if server.operation.try_lock().is_err()
+                || server.active.lock().map(|a| !a.is_empty()).unwrap_or(true)
+            {
+                return Err(CoreError::Invalid(
+                    "Остановите задачи аккаунта перед сменой способа входа".into(),
+                ));
+            }
+        }
+        if let Some(server) = servers.remove(&account.id) {
+            server.stop();
+        }
+        if let Some(login) = self
+            .logins
+            .lock()
+            .map_err(|_| CoreError::Busy)?
+            .remove(&account.id)
+        {
+            login.abort();
+        }
+        native_auth::select(account)?;
+        drop(servers);
+        native_auth::login(&self.server(account).await?.peer).await
     }
 
     async fn extensions(&self, account: &AccountProfile) -> Result<Extensions> {
@@ -1268,6 +1341,28 @@ fn account_notification(account_id: &str, method: &str, params: &Value) -> Optio
     }
 }
 
+async fn read_rate_limits(peer: &RpcPeer, status: &mut AccountStatus) {
+    match peer
+        .request("account/rateLimits/read", Value::Null, REQUEST_TIMEOUT)
+        .await
+    {
+        Ok(value) => {
+            apply_rate_limits(&value, status);
+            if status.usage.is_empty() {
+                status.usage_error = Some(
+                    "Codex App Server не передал проценты лимитов для этого подключения.".into(),
+                );
+            }
+        }
+        Err(error) => {
+            let detail = provider_error(error, None).to_string();
+            status.usage_error = Some(format!(
+                "Лимиты Codex недоступны для текущей авторизации. {detail}"
+            ));
+        }
+    }
+}
+
 /// Reads the Codex rate-limit snapshot. Prefers the `codex` bucket when several are reported.
 fn apply_rate_limits(value: &Value, status: &mut AccountStatus) {
     let snapshot = value
@@ -1282,15 +1377,19 @@ fn apply_rate_limits(value: &Value, status: &mut AccountStatus) {
         let Some(used) = window.get("usedPercent").and_then(Value::as_f64) else {
             continue;
         };
+        if !(0.0..=100.0).contains(&used) {
+            continue;
+        }
         status.usage.push(UsageWindow {
+            label: None,
             window_minutes: window.get("windowDurationMins").and_then(Value::as_i64),
-            used_percent: used.clamp(0.0, 100.0),
+            used_percent: used,
             resets_at: window.get("resetsAt").and_then(Value::as_i64),
             source: "codex".into(),
         });
     }
     if let Some(plan) = str_at(snapshot, "planType") {
-        status.plan.get_or_insert_with(|| plan.to_string());
+        status.plan = Some(plan.to_string());
     }
     status.limit_reached = str_at(snapshot, "rateLimitReachedType").map(str::to_string);
     if let Some(credits) = snapshot.get("credits").filter(|value| !value.is_null()) {
@@ -1423,6 +1522,45 @@ mod tests {
         apply_rate_limits(&json!({"rateLimits": {"primary": null}}), &mut status);
         assert!(status.usage.is_empty());
         assert!(status.plan.is_none());
+    }
+
+    #[tokio::test]
+    async fn quota_refresh_requests_only_the_official_read_method_and_surfaces_errors() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        for fails in [false, true] {
+            let (client, server) = tokio::io::duplex(8192);
+            let (read, write) = tokio::io::split(client);
+            let peer = RpcPeer::start(read, write);
+            let job = tokio::spawn(async move {
+                let (read, mut write) = tokio::io::split(server);
+                let mut lines = BufReader::new(read).lines();
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], "account/rateLimits/read");
+                let response = if fails {
+                    json!({"id":request["id"],"error":{"code":-32600,"message":"ChatGPT authentication required"}})
+                } else {
+                    json!({"id":request["id"],"result":{"rateLimits":{"primary":{"usedPercent":27,"resetsAt":1800000000,"windowDurationMins":300}}}})
+                };
+                write
+                    .write_all(format!("{response}\n").as_bytes())
+                    .await
+                    .unwrap();
+            });
+            let mut status = AccountStatus::default();
+            read_rate_limits(&peer, &mut status).await;
+            if fails {
+                assert!(status.usage.is_empty());
+                assert!(status
+                    .usage_error
+                    .unwrap()
+                    .contains("authentication required"));
+            } else {
+                assert_eq!(status.usage[0].used_percent, 27.0);
+                assert!(status.usage_error.is_none());
+            }
+            job.await.unwrap();
+        }
     }
 
     #[test]

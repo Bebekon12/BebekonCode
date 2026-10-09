@@ -382,14 +382,16 @@ async fn setup_sandbox(account_id: String, state: State<'_, AppState>) -> IpcRes
 #[tauri::command]
 async fn account_login(
     account_id: String,
+    for_usage: Option<bool>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> IpcResult<()> {
-    let login = state
-        .core
-        .account_login(&account_id)
-        .await
-        .map_err(|error| error.to_string())?;
+    let login = if for_usage == Some(true) {
+        state.core.account_login_for_usage(&account_id).await
+    } else {
+        state.core.account_login(&account_id).await
+    }
+    .map_err(|error| error.to_string())?;
     if login.url.is_empty() {
         return Ok(());
     }

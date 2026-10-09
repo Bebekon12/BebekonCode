@@ -30,7 +30,8 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   await expect(limits.locator('.limit-account')).toHaveCount(2);
   await expect(limits).toContainText('Мой Claude');
   await expect(limits).toContainText('Мой GPT');
-  await expect(limits).toContainText('Проценты не получены от Claude CLI');
+  await expect(limits).toContainText('Лимиты недоступны');
+  await expect(limits).toContainText('Claude SDK · экспериментальный API');
   await expect(limits.getByRole('progressbar', { name: /Мой GPT: 5 часов/ })).toHaveAttribute(
     'value',
     '75',

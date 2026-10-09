@@ -63,7 +63,7 @@ export const desktop: ClientTransport = {
   removeAccount: (accountId) => invoke('remove_account', { accountId }),
   accountStatus: (accountId) => invoke('account_status', { accountId }),
   setupSandbox: (accountId) => invoke('setup_sandbox', { accountId }),
-  accountLogin: (accountId) => invoke('account_login', { accountId }),
+  accountLogin: (accountId, forUsage = false) => invoke('account_login', { accountId, forUsage }),
   accountLogout: (accountId) => invoke('account_logout', { accountId }),
   accountModels: (accountId) => invoke('account_models', { accountId }),
   accountExtensions: (accountId) => invoke('account_extensions', { accountId }),

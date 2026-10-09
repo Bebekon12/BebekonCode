@@ -72,6 +72,12 @@ pub trait AgentProvider: Send + Sync {
         ))
     }
 
+    async fn login_for_usage(&self, _account: &AccountProfile) -> Result<LoginStart> {
+        Err(CoreError::Invalid(
+            "Отдельный вход для лимитов недоступен".into(),
+        ))
+    }
+
     async fn logout(&self, _account: &AccountProfile) -> Result<()> {
         Ok(())
     }

@@ -7,5 +7,5 @@ export default defineConfig({
     rollupOptions: { output: { manualChunks: { markdown: ['react-markdown', 'remark-gfm'] } } },
   },
   server: { host: '127.0.0.1', port: 1420, strictPort: true },
-  test: { include: ['src/**/*.test.ts'] },
+  test: { include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'] },
 });

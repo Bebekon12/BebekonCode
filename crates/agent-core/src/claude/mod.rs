@@ -280,44 +280,8 @@ impl AgentProvider for ClaudeProvider {
         }
         let mut status = self.auth_status(account).await?;
         if status.state == "signed_in" {
-            let mut command = self.command(Some(account))?;
-            // Only built-in /usage; no tools, custom settings, project hooks or persistence.
-            command.args([
-                "--print",
-                "/usage",
-                "--output-format",
-                "json",
-                "--restricted",
-                "--tools",
-                "",
-                "--setting-sources",
-                "",
-                "--strict-mcp-config",
-                "--mcp-config",
-                "{\"mcpServers\":{}}",
-                "--settings",
-                "{\"disableAllHooks\":true,\"enabledPlugins\":{}}",
-                "--no-session-persistence",
-            ]);
-            match capture(command, Duration::from_secs(20)).await {
-                Ok((true, bytes)) => {
-                    if let Some((windows, detail)) = serde_json::from_slice::<Value>(&bytes)
-                        .ok()
-                        .as_ref()
-                        .and_then(usage::parse)
-                    {
-                        status.limit_reached = windows
-                            .iter()
-                            .any(|window| window.used_percent >= 100.0)
-                            .then(|| "usage_limit".into());
-                        status.usage = windows;
-                        status.usage_detail = Some(detail);
-                    }
-                }
-                _ => {
-                    status.usage_detail =
-                        Some("Claude CLI не вернул данные /usage. Обновите позже.".into())
-                }
+            if let Err(error) = usage::read(self, account, &mut status).await {
+                status.usage_error = Some(error.to_string());
             }
         }
         Ok(status)

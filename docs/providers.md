@@ -16,6 +16,9 @@ Official `codex app-server` over stdio, one process per account (`crates/agent-c
   DPAPI-protected credential record and its own `CODEX_HOME`. Accounts never share tokens.
 - **Sign-in.** "Continue with ChatGPT" opens OpenAI's authorization page; a one-shot listener on
   `127.0.0.1` receives the callback, then the code is exchanged and the ID token validated.
+  For subscription quotas, an explicit "Sign in through Codex" action uses the official
+  `account/login/start` ChatGPT flow instead, in the same isolated `CODEX_HOME`. Codex owns
+  credentials in the OS keyring, refresh and logout; the selected mode has no automatic fallback.
 - **Sessions.** `thread/start` / `thread/resume` / `turn/start` / `turn/interrupt`. The Codex thread
   id is stored as the session's `provider_session_id`. A session's account never changes.
 - **Events.** Agent-message deltas, commands, file changes, MCP calls, web search, plans and errors
@@ -24,7 +27,8 @@ Official `codex app-server` over stdio, one process per account (`crates/agent-c
   reason: allow once, allow for the session, or deny. Other request types are declined visibly.
 - **Models, plugins, MCP, skills.** `model/list`, `plugin/list`, `mcpServerStatus/list` and
   `skills/list` per account.
-- **Usage.** Shown only when Codex reports it; otherwise the account links to ChatGPT usage
+- **Usage.** Read with `account/rateLimits/read` without inference and updated by
+  `account/rateLimits/updated`. Shown only when Codex reports it; otherwise the account links to ChatGPT usage
   settings. A usage-limit error stops work; switching accounts is a manual user action.
 - **Process hygiene.** Allowlisted environment (no other provider's keys), no console window, each
   process tree in its own kill-on-close Job Object, pipes read on dedicated OS threads.
@@ -40,6 +44,10 @@ default-client credentials, embedded OAuth, provider keys in the frontend or cus
 
 - `auth status/login/logout`; the CLI opens its own browser flow. Console login instructions are
   displayed with the exact isolated profile. No quota percentages are inferred.
+- Subscription quotas use the embedded, pinned official Agent SDK 0.3.295 public experimental
+  usage method, without a prompt, tools or transcript scanning. Local Node.js 18+ is required.
+  Reported five-hour, weekly and model windows include reset times. SDK/runtime/authorization
+  failures remain visible. The SDK does not own inference or replace the installed CLI.
 - `claude --print --output-format stream-json --verbose --include-partial-messages`, prompt over
   stdin, UUID session resume, structured output for automatic task decomposition.
 - Sonnet/Opus/Haiku are documented aliases, not a discovered entitlement catalog. Anthropic
