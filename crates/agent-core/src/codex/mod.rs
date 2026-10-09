@@ -264,6 +264,8 @@ impl CodexProvider {
                     "model_provider=\"openai\"",
                     "forced_login_method=\"chatgpt\"",
                     "cli_auth_credentials_store=\"keyring\"",
+                    "analytics.enabled=false",
+                    "feedback.enabled=false",
                 ]
                 .into_iter()
                 .flat_map(|value| ["-c", value]),

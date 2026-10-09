@@ -28,6 +28,8 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
   A nonsecret per-profile mode marker prevents silent fallback to the older SIWC registration.
   Active account processes block switching. SIWC credentials are neither copied nor passed
   to the native-auth process. Native quotas still depend on the server response.
+  Native sign-in also explicitly sets the documented `analytics.enabled=false` and
+  `feedback.enabled=false` configuration options; the app adds no telemetry.
 - Re-fetched the [Claude SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript)
   and inspected Anthropic's published `@anthropic-ai/claude-agent-sdk` **0.3.295** `sdk.d.ts`.
   The reference page omits the experimental usage method, but the official package documents
