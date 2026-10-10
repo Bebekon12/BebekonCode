@@ -652,23 +652,6 @@ export function App() {
                   chooseAnotherAccount={() => {
                     setAgentDialog({ id: session.id, handoff: true });
                   }}
-                  changes={
-                    client &&
-                    workspace &&
-                    workspace.id !== 'chat-scratch' &&
-                    session.provider !== 'mock'
-                      ? {
-                          load: async () => {
-                            const [status, diff] = await Promise.all([
-                              client.gitStatus(workspace.id),
-                              client.gitDiff(workspace.id),
-                            ]);
-                            return { status, diff };
-                          },
-                          open: () => setDialog('changes'),
-                        }
-                      : undefined
-                  }
                   events={events.filter((event) => event.session_id === session.id)}
                   historyLoading={historyLoading}
                 />

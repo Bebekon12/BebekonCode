@@ -36,6 +36,8 @@ pub struct Session {
     pub created_at: i64,
     pub updated_at: i64,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode: bool,
     pub tool_policy: String,
     pub parent_session_id: Option<String>,
     pub chat_mode: String,
@@ -57,6 +59,8 @@ pub struct AgentConfig {
     pub account_profile_id: String,
     pub model: String,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode: bool,
     pub permission_profile: String,
     #[serde(default)]
     pub tools: ToolPolicy,
@@ -112,10 +116,35 @@ pub enum EventPayload {
         model: String,
         account_profile_id: String,
         reasoning_effort: Option<String>,
+        #[serde(default)]
+        fast_mode: bool,
     },
     ToolActivity {
         label: String,
         detail: String,
+    },
+    RunChanges {
+        files: Vec<ChangedFile>,
+        limited: bool,
+    },
+    ProviderRunStarted {
+        provider: String,
+        model: String,
+        purpose: String,
+        resumed: bool,
+        prompt_bytes: u64,
+    },
+    ProviderUsage {
+        provider: String,
+        model_requests: Option<u64>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+        cache_creation_tokens: Option<u64>,
+        #[serde(default)]
+        reasoning_tokens: Option<u64>,
+        #[serde(default)]
+        incomplete: bool,
     },
     /// The agent asks the user before acting. Shown verbatim; never auto-approved by the app.
     ApprovalRequested {
@@ -207,6 +236,17 @@ pub struct ModelInfo {
     pub is_default: bool,
     pub reasoning_efforts: Vec<String>,
     pub default_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode_available: bool,
+}
+
+/// Counts only; file content and patches are never persisted for change-card snapshots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChangedFile {
+    pub path: String,
+    pub status: String,
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

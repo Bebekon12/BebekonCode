@@ -1,5 +1,6 @@
 import { ChatMarkdown } from './ChatMarkdown';
-import { RunChanges, type ChangeSource } from './RunChanges';
+import { RunChanges } from './RunChanges';
+import { UsageDiagnostics } from './UsageDiagnostics';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ImagePreview } from './ImagePreview';
 import { effortLabels } from '../chat';
@@ -69,7 +70,6 @@ export function Timeline({
   retry,
   chooseAnotherAccount,
   manageUsage,
-  changes,
   loadImage,
 }: {
   events: AgentEvent[];
@@ -84,8 +84,6 @@ export function Timeline({
   retry: (prompt: string) => void;
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
-  /** Project change summary under the latest finished answer; absent without a Git project. */
-  changes?: ChangeSource;
   loadImage?: (path: string) => Promise<string>;
 }) {
   const demo = session.provider === 'mock';
@@ -365,7 +363,6 @@ export function Timeline({
               chooseAnotherAccount={chooseAnotherAccount}
               manageUsage={manageUsage}
               last={turn.id === turns[turns.length - 1]?.id}
-              changes={running ? undefined : changes}
               viewImage={(file) => void viewImage(file)}
             />
           ))}
@@ -516,7 +513,6 @@ const TurnStep = memo(
     a.live === b.live &&
     a.open === b.open &&
     a.last === b.last &&
-    !a.changes === !b.changes &&
     !a.manageUsage === !b.manageUsage,
 );
 
@@ -536,7 +532,6 @@ function TurnStepView({
   chooseAnotherAccount,
   manageUsage,
   last,
-  changes,
   viewImage,
 }: {
   turn: TimelineTurn;
@@ -554,7 +549,6 @@ function TurnStepView({
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
   last: boolean;
-  changes?: ChangeSource;
   viewImage: (file: { name: string; path: string }) => void;
 }) {
   const state: StepState = turn.status === 'running' && interrupted ? 'interrupted' : turn.status;
@@ -693,7 +687,7 @@ function TurnStepView({
           <div>
             <div
               className="entry-label"
-              title={`${providerName} · ${model} · ${turn.reasoningEffort ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)` : 'Уровень по умолчанию CLI'}`}
+              title={`${providerName} · ${model} · ${turn.reasoningEffort ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)` : 'Уровень по умолчанию CLI'}${turn.fastMode ? ' · Fast (запрошено)' : ''}`}
             >
               {team ? 'Ответ команды' : providerName}
             </div>
@@ -707,9 +701,10 @@ function TurnStepView({
           </div>
         </div>
       )}
-      {last && changes && turn.status !== 'running' && filter !== 'tools' && (
-        <RunChanges source={changes} refreshKey={`${turn.id}:${turn.finishedAt ?? ''}`} />
+      {last && turn.changes && turn.status !== 'running' && filter !== 'tools' && (
+        <RunChanges summary={turn.changes} />
       )}
+      {open && turn.status !== 'running' && filter !== 'tools' && <UsageDiagnostics turn={turn} />}
       {turn.error && turn.errorKind === 'usage_limit' ? (
         <div role="alert" className="limit-notice">
           <strong>Аккаунт достиг текущего лимита провайдера</strong>

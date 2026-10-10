@@ -53,6 +53,7 @@ pub trait AgentProvider: Send + Sync {
                 is_default: false,
                 reasoning_efforts: vec![],
                 default_reasoning_effort: None,
+                fast_mode_available: false,
             })
             .collect())
     }

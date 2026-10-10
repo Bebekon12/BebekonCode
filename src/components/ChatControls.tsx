@@ -46,9 +46,19 @@ export function ChatControls({
             models={models}
             model={session.model}
             effort={session.reasoning_effort}
+            provider={session.provider}
+            fastMode={session.fast_mode ?? false}
+            changeFastMode={(fast_mode) => configure({ ...sessionConfig(session), fast_mode })}
             disabled={disabled}
             change={(model, reasoning_effort) =>
-              configure({ ...sessionConfig(session), model, reasoning_effort })
+              configure({
+                ...sessionConfig(session),
+                model,
+                reasoning_effort,
+                fast_mode:
+                  !!session.fast_mode &&
+                  !!models.find((item) => item.id === model)?.fast_mode_available,
+              })
             }
           />
         )}

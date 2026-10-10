@@ -5,11 +5,20 @@ configuration, parent links, roles, modes and a handoff summary without rewritin
 or existing events. Old sessions become single chats and keep their provider thread IDs.
 
 The selected provider/account is explicit. Model/effort/access/tool changes are permitted between
-turns. A handoff reserves the chat, validates the target, asks the source account for a summary
-in a separate read-only thread, then atomically stores the target binding and resets the upstream
-thread ID. Errors/cancellation before committing retain the source. The first target turn includes
-the stored summary. Saved chat events are not deleted or rewritten; new replies record their
+turns. A handoff reserves the chat and its children, validates the target, builds a bounded,
+redacted context snapshot from local saved history (including public worker messages, attachments,
+errors and partial work), then atomically stores the target binding and resets the upstream
+thread ID. It makes no inference request to the source or target, so an exhausted source quota
+cannot block transfer. Errors/cancellation before committing retain the source. The first target turn includes
+the stored snapshot. Saved chat events are not deleted or rewritten; new replies record their
 provider/model configuration. Provider-side auto-compaction remains the provider's responsibility.
+
+An explicit handoff changes team/auto chats to single-agent execution. The dialog states this
+before the user switches. Old child configurations and task histories remain stored but are never
+scheduled by subsequent messages in that chat; no child is rebound or granted additional access.
+Separately running children block transfer. Previous handoff activity snapshots are not recursively
+quoted into new snapshots. This is a local history transfer, not a provider-generated verification
+of work or a guarantee that an entire long history fits the bounded context.
 
 Team participants are saved child configurations. Each user request creates separate child task
 sessions, including a bounded common context; at most two run concurrently. Team review sends

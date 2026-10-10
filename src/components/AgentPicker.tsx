@@ -59,6 +59,7 @@ export function AgentPicker({
         patch({
           ...latest,
           model: model?.id ?? '',
+          fast_mode: !!latest.fast_mode && !!model?.fast_mode_available,
           reasoning_effort: model?.reasoning_efforts?.includes(latest.reasoning_effort ?? '')
             ? latest.reasoning_effort
             : null,
@@ -126,6 +127,7 @@ export function AgentPicker({
                   account_profile_id: account?.id ?? '',
                   model: '',
                   reasoning_effort: null,
+                  fast_mode: false,
                   tools: {},
                   // Full access exists only for some providers; never carry it over silently.
                   permission_profile:
@@ -152,6 +154,7 @@ export function AgentPicker({
                 change({
                   ...value,
                   account_profile_id: e.target.value,
+                  fast_mode: false,
                   model: '',
                   reasoning_effort: null,
                   tools: {},
@@ -176,7 +179,16 @@ export function AgentPicker({
             aria-label="Модель"
             value={value.model}
             disabled={loading || !models.length}
-            onChange={(e) => change({ ...value, model: e.target.value, reasoning_effort: null })}
+            onChange={(e) =>
+              change({
+                ...value,
+                model: e.target.value,
+                reasoning_effort: null,
+                fast_mode:
+                  !!value.fast_mode &&
+                  !!models.find((item) => item.id === e.target.value)?.fast_mode_available,
+              })
+            }
           >
             {loading && <option value={value.model}>Загрузка моделей…</option>}
             {models.map((m) => (
@@ -188,6 +200,9 @@ export function AgentPicker({
         </label>
         <ReasoningSlider
           model={model}
+          provider={value.provider}
+          fastMode={value.fast_mode ?? false}
+          changeFastMode={(fast_mode) => change({ ...value, fast_mode })}
           value={value.reasoning_effort}
           change={(reasoning_effort) => change({ ...value, reasoning_effort })}
         />

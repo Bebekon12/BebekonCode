@@ -30,6 +30,7 @@ pub struct TurnState {
     last_message: Option<String>,
     has_text: bool,
     file_changes: HashMap<String, Vec<String>>,
+    pub(super) usage: super::usage::Tracker,
 }
 
 impl TurnState {
@@ -41,6 +42,7 @@ impl TurnState {
             last_message: None,
             has_text: false,
             file_changes: HashMap::new(),
+            usage: super::usage::Tracker::default(),
         }
     }
 
@@ -51,7 +53,10 @@ impl TurnState {
         }
         match (
             self.turn_id.as_deref(),
-            params.get("turnId").and_then(Value::as_str),
+            params
+                .get("turnId")
+                .or_else(|| params.pointer("/turn/id"))
+                .and_then(Value::as_str),
         ) {
             (Some(ours), Some(theirs)) => ours == theirs,
             _ => true,
@@ -78,6 +83,22 @@ impl TurnState {
 }
 
 pub fn map_notification(method: &str, params: &Value, state: &mut TurnState) -> Vec<Mapped> {
+    if method == "thread/tokenUsage/updated" {
+        if str_at(params, "threadId") != Some(state.thread_id.as_str()) {
+            return vec![];
+        }
+        let (Some(ours), Some(theirs)) = (state.turn_id.as_deref(), str_at(params, "turnId"))
+        else {
+            return vec![];
+        };
+        if ours == theirs {
+            state.usage.observe(&params["tokenUsage"]);
+        } else {
+            // A cold resume can replay previous-turn counters after its RPC response.
+            state.usage.restore(&params["tokenUsage"]);
+        }
+        return vec![];
+    }
     if !state.owns(params) {
         return vec![];
     }
@@ -119,7 +140,10 @@ pub fn map_notification(method: &str, params: &Value, state: &mut TurnState) -> 
                 Some("interrupted") => TurnEnd::Interrupted,
                 _ => turn_failure(turn.get("error")),
             };
-            vec![Mapped::Finished(end)]
+            if end != TurnEnd::Completed {
+                state.usage.mark_incomplete();
+            }
+            finish(end, state)
         }
         "error" => {
             if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
@@ -128,10 +152,21 @@ pub fn map_notification(method: &str, params: &Value, state: &mut TurnState) -> 
                     detail: "Codex повторяет запрос после временной ошибки".into(),
                 })];
             }
-            vec![Mapped::Finished(turn_failure(params.get("error")))]
+            state.usage.mark_incomplete();
+            finish(turn_failure(params.get("error")), state)
         }
         _ => vec![],
     }
+}
+
+fn finish(end: TurnEnd, state: &mut TurnState) -> Vec<Mapped> {
+    state
+        .usage
+        .take()
+        .into_iter()
+        .map(Mapped::Event)
+        .chain(std::iter::once(Mapped::Finished(end)))
+        .collect()
 }
 
 fn completed_item(item: &Value, state: &mut TurnState) -> Vec<Mapped> {

@@ -340,6 +340,12 @@ impl Core {
         let (tx, mut rx) = mpsc::channel(64);
         let session = &request.session;
         let session_id = session.id.clone();
+        let change_root = session.working_directory.clone();
+        let baseline = if session.parent_session_id.is_none() && session.provider != "mock" {
+            crate::changes::snapshot(Path::new(&change_root)).await
+        } else {
+            None
+        };
         let relay: Option<(String, String, String)> = if session.chat_mode == "task" {
             if let Some(parent) = &session.parent_session_id {
                 let parent_run: Option<String> = sqlx::query_scalar("SELECT run_id FROM events WHERE session_id=? AND json_extract(payload,'$.type')='turn_started' ORDER BY sequence DESC LIMIT 1")
@@ -365,6 +371,7 @@ impl Core {
             model: request.session.model.clone(),
             account_profile_id: request.account.id.clone(),
             reasoning_effort: request.session.reasoning_effort.clone(),
+            fast_mode: request.session.fast_mode,
         };
         match self.storage.append(&session, &run, metadata, None).await {
             Ok(event) => {
@@ -381,6 +388,25 @@ impl Core {
         }
         let child_cancel = cancel.clone();
         let request_effort = request.session.reasoning_effort.clone();
+        let launch = EventPayload::ProviderRunStarted {
+            provider: request.session.provider.clone(),
+            model: request.session.model.clone(),
+            purpose: "execution".into(),
+            resumed: request.session.provider_session_id.is_some(),
+            prompt_bytes: request.prompt.len() as u64,
+        };
+        if self
+            .emit(&session, &run, launch.clone(), None)
+            .await
+            .is_err()
+        {
+            tracing::warn!(code = "provider_launch_diagnostic_failed");
+        }
+        if let Some((parent, parent_run, _)) = &relay {
+            if self.emit(parent, parent_run, launch, None).await.is_err() {
+                tracing::warn!(code = "provider_launch_relay_failed");
+            }
+        }
         let producer = tokio::spawn(async move { provider.run(request, tx, child_cancel).await });
         let mut failed = false;
         let mut reported_failure = None;
@@ -399,7 +425,12 @@ impl Core {
                 continue;
             }
             // Approval outcomes are still recorded while a cancelled turn winds down.
-            if cancel.is_cancelled() && !matches!(payload, EventPayload::ApprovalResolved { .. }) {
+            if cancel.is_cancelled()
+                && !matches!(
+                    payload,
+                    EventPayload::ApprovalResolved { .. } | EventPayload::ProviderUsage { .. }
+                )
+            {
                 continue;
             }
             if let EventPayload::AssistantTextDelta { text } = &payload {
@@ -415,6 +446,7 @@ impl Core {
             }
             if let Some((parent, parent_run, title)) = &relay {
                 let forwarded = match &payload {
+                    EventPayload::ProviderUsage { .. } => Some(payload.clone()),
                     EventPayload::AssistantTextDelta { text }
                     | EventPayload::ProgressDelta { text } => Some(EventPayload::TeamMessage {
                         session_id: session.clone(),
@@ -494,6 +526,13 @@ impl Core {
             Err(_) => Some(("Обработчик провайдера аварийно завершился".into(), None)),
         };
         let provider_failure = provider_failure.or(reported_failure);
+        if self
+            .record_changes(&session, &run, &change_root, baseline)
+            .await
+            .is_err()
+        {
+            tracing::warn!(code = "turn_change_snapshot_failed");
+        }
         let (payload, status) = if let Some((message, kind)) = provider_failure {
             (EventPayload::ProviderError { message, kind }, "failed")
         } else if failed {

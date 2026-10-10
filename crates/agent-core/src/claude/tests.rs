@@ -279,6 +279,56 @@ fn errors_and_incomplete_streams_never_become_success() {
 }
 
 #[test]
+fn session_limit_result_is_reported_as_a_usage_limit() {
+    let mut state = mapping::StreamState::new(false);
+    let error = state
+        .accept(json!({
+            "type": "result", "subtype": "error_during_execution", "is_error": true,
+            "result": "You've hit your session limit · resets 10:10pm (Europe/Moscow)"
+        }))
+        .unwrap_err();
+    assert!(matches!(error, CoreError::Provider { kind: Some(kind), .. } if kind == "usage_limit"));
+    assert!(state.finish().is_err());
+}
+
+#[test]
+fn usage_uses_per_turn_counters_and_never_sums_resumed_cumulative_cost_or_usage() {
+    let event = mapping::reported_usage(&json!({
+        "type":"result", "num_turns": 3,
+        "usage": {"input_tokens": 123,"output_tokens":45,"cache_read_input_tokens":900,"cache_creation_input_tokens":12},
+        "modelUsage": {"claude-opus-5-5":{"inputTokens":99999,"costUSD":999}},
+        "total_cost_usd":999, "private":"password=do-not-persist"
+    })).unwrap();
+    assert_eq!(
+        event,
+        EventPayload::ProviderUsage {
+            provider: "anthropic".into(),
+            model_requests: Some(3),
+            input_tokens: Some(123),
+            output_tokens: Some(45),
+            cache_read_tokens: Some(900),
+            cache_creation_tokens: Some(12),
+            reasoning_tokens: None,
+            incomplete: false,
+        }
+    );
+    assert!(
+        mapping::reported_usage(&json!({"type":"result","usage":{"input_tokens":-1}})).is_none()
+    );
+    assert!(mapping::reported_usage(
+        &json!({"type":"result","parent_tool_use_id":"child","num_turns":3})
+    )
+    .is_none());
+    assert!(mapping::reported_usage(
+        &json!({"type":"result","modelUsage":{"opus":{"inputTokens":999}}})
+    )
+    .is_none());
+    assert!(!serde_json::to_string(&event)
+        .unwrap()
+        .contains("do-not-persist"));
+}
+
+#[test]
 fn file_guard_rejects_escape_credentials_and_commands() {
     let temp = crate::test_support::TestDirectory::new().unwrap();
     std::fs::write(temp.path().join("a.txt"), "old").unwrap();
@@ -377,6 +427,7 @@ fn turn(root: &Path) -> TurnRequest {
             chat_mode: "single".into(),
             role: String::new(),
             context_summary: String::new(),
+            fast_mode: false,
         },
     }
 }
@@ -575,6 +626,8 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
     let profile = temp.path().join("profile");
     std::fs::create_dir(&profile).unwrap();
     request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    request.session.model = "claude-opus-5-5".into();
+    request.session.fast_mode = true;
     request.prompt = "[WRITE]".into();
     let (tx, mut rx) = mpsc::channel(64);
     let engine = provider.clone();
@@ -582,6 +635,7 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
     let task = tokio::spawn(async move { engine.run(sent, tx, CancellationToken::new()).await });
     let mut thread = None;
     let mut text = String::new();
+    let mut usage_events = 0;
     while let Some(event) = tokio::time::timeout(Duration::from_secs(15), rx.recv())
         .await
         .unwrap()
@@ -600,16 +654,29 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
             }
             EventPayload::ProviderSession { id } => thread = Some(id),
             EventPayload::AssistantTextDelta { text: delta } => text.push_str(&delta),
+            EventPayload::ProviderUsage {
+                input_tokens,
+                cache_read_tokens,
+                model_requests,
+                ..
+            } => {
+                usage_events += 1;
+                assert_eq!(input_tokens, Some(10));
+                assert_eq!(cache_read_tokens, Some(20));
+                assert_eq!(model_requests, Some(2));
+            }
             _ => {}
         }
     }
     task.await.unwrap().unwrap();
     assert_eq!(text, "Claude fixture result");
+    assert_eq!(usage_events, 1);
     assert_eq!(
         std::fs::read_to_string(temp.path().join("approved.txt")).unwrap(),
         "Approved through the local pipe"
     );
     request.session.provider_session_id = thread.clone();
+    request.session.fast_mode = false;
     request.prompt = "Continue".into();
     let (tx, mut rx) = mpsc::channel(64);
     provider
@@ -623,6 +690,17 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
         }
     }
     assert_eq!(thread, resumed);
+    let launches: Vec<serde_json::Value> =
+        std::fs::read_to_string(profile.join("fixture-invocations.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(launches[0]["fast_mode"], true);
+    assert_eq!(launches[1]["fast_mode"], false);
+    assert_eq!(launches[0]["id"], launches[1]["id"]);
+    assert_eq!(launches[0]["model"], "claude-opus-5-5");
     request.account.id = "other-account".into();
     let (tx, _) = mpsc::channel(4);
     assert!(provider
@@ -818,6 +896,7 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
         .await
         .unwrap();
     let config = AgentConfig {
+        fast_mode: false,
         provider: "anthropic".into(),
         account_profile_id: account.id,
         model: "sonnet".into(),
@@ -827,6 +906,7 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
         role: "Claude reviewer".into(),
     };
     let demo = AgentConfig {
+        fast_mode: false,
         provider: "mock".into(),
         account_profile_id: "mock-local".into(),
         model: "mock-stream-v1".into(),

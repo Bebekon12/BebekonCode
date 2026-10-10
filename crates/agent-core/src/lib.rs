@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod capabilities;
 pub mod catalog;
+mod changes;
 mod chats;
 pub mod claude;
 pub mod codex;

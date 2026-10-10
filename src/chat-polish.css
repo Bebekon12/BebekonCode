@@ -1,4 +1,31 @@
 /* Compact controls and file/catalog surfaces; shared colors follow the selected theme. */
+.fast-mode-toggle.active,
+.fast-mode-mark {
+  color: var(--info);
+}
+.fast-mode-toggle.active {
+  background: var(--surface-hover);
+}
+.usage-diagnostics {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+}
+.usage-diagnostics summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.usage-diagnostics dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+.usage-diagnostics dd {
+  margin: 0;
+}
 .model-trigger .trigger-effort {
   color: var(--info);
   font-size: var(--font-caption);

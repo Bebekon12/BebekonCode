@@ -2,6 +2,47 @@ use super::failure;
 use crate::{model::EventPayload, Result};
 use serde_json::Value;
 
+/// The public result's `usage` is per-turn main-agent usage. `modelUsage` and cost
+/// can include prior resumed turns, so never sum those cumulative fields here.
+pub(super) fn reported_usage(value: &Value) -> Option<EventPayload> {
+    if value["type"] != "result"
+        || value
+            .get("parent_tool_use_id")
+            .is_some_and(|id| !id.is_null())
+    {
+        return None;
+    }
+    let counter = |field: &Value| field.as_u64().filter(|n| *n <= 1_000_000_000_000);
+    let usage = &value["usage"];
+    let model_requests = counter(&value["num_turns"]);
+    let input_tokens = counter(&usage["input_tokens"]);
+    let output_tokens = counter(&usage["output_tokens"]);
+    let cache_read_tokens = counter(&usage["cache_read_input_tokens"]);
+    let cache_creation_tokens = counter(&usage["cache_creation_input_tokens"]);
+    if [
+        model_requests,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+    ]
+    .iter()
+    .all(Option::is_none)
+    {
+        return None;
+    }
+    Some(EventPayload::ProviderUsage {
+        provider: "anthropic".into(),
+        model_requests,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+        reasoning_tokens: None,
+        incomplete: false,
+    })
+}
+
 pub(super) struct StreamState {
     structured: bool,
     streamed_message: bool,
@@ -85,7 +126,7 @@ impl StreamState {
                 if value["is_error"].as_bool() == Some(true) || subtype != "success" {
                     let message = value["result"].as_str().or_else(|| value["errors"].as_array().and_then(|errors| errors.first()).and_then(Value::as_str)).unwrap_or("Claude не завершил задачу успешно");
                     let lower = message.to_ascii_lowercase();
-                    let kind = if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("hit your limit") { Some("usage_limit") } else if lower.contains("auth") || lower.contains("not logged") || lower.contains("login") { Some("auth") } else { None };
+                    let kind = if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("session limit") || lower.contains("hit your limit") { Some("usage_limit") } else if lower.contains("auth") || lower.contains("not logged") || lower.contains("login") { Some("auth") } else { None };
                     return Err(failure(message, kind));
                 }
                 if self.structured {

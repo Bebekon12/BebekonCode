@@ -1,89 +1,64 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { ChevronRight, FileDiff } from 'lucide-react';
-import type { GitStatus } from '../contracts';
-import { diffTotals, parseDiff, type DiffFile } from '../diffstat';
+import type { ChangedFile } from '../contracts';
 
-export interface ChangeSource {
-  load: () => Promise<{ status: GitStatus; diff: string }>;
-  open: () => void;
-}
-
-interface Summary {
-  files: DiffFile[];
-  untracked: string[];
-}
-
-/**
- * Codex-style summary under the final answer: changed files with +/− lines.
- * Counts the uncommitted working tree, so earlier uncommitted edits are included.
- */
-export function RunChanges({ source, refreshKey }: { source: ChangeSource; refreshKey: string }) {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const load = useRef(source.load);
-  load.current = source.load;
-  useEffect(() => {
-    let alive = true;
-    setSummary(null);
-    load
-      .current()
-      .then(({ status, diff }) => {
-        if (!alive) return;
-        const files = parseDiff(diff);
-        const known = new Set(files.map((file) => file.path));
-        const untracked = status.files
-          .filter((file) => file.status === '??' && !known.has(file.path))
-          .map((file) => file.path);
-        setSummary({ files, untracked });
-      })
-      // Not a Git project or Git unavailable: the answer simply has no change summary.
-      .catch(() => alive && setSummary(null));
-    return () => {
-      alive = false;
-    };
-  }, [refreshKey]);
-  if (!summary || (!summary.files.length && !summary.untracked.length)) return null;
-  const totals = diffTotals(summary.files);
-  const count = totals.files + summary.untracked.length;
-  const shown = summary.files.slice(0, 5);
+/** Persisted counts for the latest turn; never fetch the whole-project diff. */
+export function RunChanges({ summary }: { summary: { files: ChangedFile[]; limited: boolean } }) {
+  const [expanded, setExpanded] = useState(false);
+  const { files, limited } = summary;
+  if (!files.length) return null;
+  const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0);
+  const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
+  const unknown = limited || files.some((file) => file.added === null || file.removed === null);
   return (
-    <section className="run-changes" aria-label="Изменения в проекте">
-      <button className="run-changes-head" onClick={source.open}>
+    <section className="run-changes" aria-label="Изменения за последнее сообщение">
+      <button
+        className="run-changes-head"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+      >
         <FileDiff size={16} />
         <span className="run-changes-title">
-          {count} {plural(count, 'файл изменён', 'файла изменено', 'файлов изменено')}
+          {files.length
+            ? `${files.length} ${plural(files.length, 'файл изменён', 'файла изменено', 'файлов изменено')}`
+            : 'Снимок изменений неполный'}
         </span>
         <DiffCounts
-          added={totals.added}
-          removed={totals.removed}
-          approximate={totals.overlapping}
+          added={added}
+          removed={removed}
+          approximate={unknown}
+          approximationReason="Учтены подсчитанные строки; часть файлов или строк не удалось сравнить"
         />
         <span className="run-changes-open">
-          Просмотреть <ChevronRight size={14} />
+          {expanded ? 'Свернуть' : 'Просмотреть'} <ChevronRight size={14} />
         </span>
       </button>
       <ul>
-        {shown.map((file) => (
+        {(expanded ? files : files.slice(0, 5)).map((file) => (
           <li key={file.path}>
             <code title={file.path}>{file.path}</code>
-            {file.binary ? (
-              <span className="muted">двоичный</span>
+            {file.added === null || file.removed === null ? (
+              <span className="muted">
+                {file.status === 'added'
+                  ? 'новый'
+                  : file.status === 'deleted'
+                    ? 'удалён'
+                    : 'изменён'}{' '}
+                · строки не подсчитаны
+              </span>
             ) : (
               <DiffCounts added={file.added} removed={file.removed} />
             )}
           </li>
         ))}
-        {summary.untracked.slice(0, Math.max(0, 5 - shown.length)).map((path) => (
-          <li key={path}>
-            <code title={path}>{path}</code>
-            <span className="muted">новый</span>
-          </li>
-        ))}
       </ul>
       <p
         className="run-changes-note"
-        title="Все незафиксированные изменения проекта. Строки новых файлов не подсчитаны."
+        title="Сравнение файлов до и после сообщения. Учитываются также параллельные правки в этой папке. Содержимое файлов в истории не сохраняется."
       >
-        Рабочие изменения{count > 5 ? ` · ещё ${count - 5} файлов` : ''}
+        За последнее сообщение
+        {!expanded && files.length > 5 ? ` · ещё ${files.length - 5} файлов` : ''}
+        {limited ? ' · снимок неполный' : ''}
       </p>
     </section>
   );
@@ -93,20 +68,15 @@ export function DiffCounts({
   added,
   removed,
   approximate = false,
+  approximationReason = 'Файл изменён и в индексе, и вне его: строки могут учитываться дважды',
 }: {
   added: number;
   removed: number;
   approximate?: boolean;
+  approximationReason?: string;
 }) {
   return (
-    <span
-      className="diff-counts"
-      title={
-        approximate
-          ? 'Файл изменён и в индексе, и вне его: строки могут учитываться дважды'
-          : undefined
-      }
-    >
+    <span className="diff-counts" title={approximate ? approximationReason : undefined}>
       {approximate && '≈ '}
       <span className="diff-added">+{added}</span>
       <span className="diff-removed">−{removed}</span>

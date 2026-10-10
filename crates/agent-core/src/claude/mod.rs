@@ -130,6 +130,13 @@ impl ClaudeProvider {
     }
 }
 
+fn supports_fast_mode(model: &str) -> bool {
+    matches!(
+        model,
+        "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8"
+    )
+}
+
 fn version_supported(version: Option<&str>) -> bool {
     version
         .and_then(|v| semver::Version::parse(v).ok())
@@ -326,6 +333,7 @@ impl AgentProvider for ClaudeProvider {
                     .to_vec()
             },
             default_reasoning_effort: None,
+            fast_mode_available: supports_fast_mode(id),
         })
         .collect())
     }
@@ -507,11 +515,18 @@ impl ClaudeProvider {
             self.grants.clone(),
         )
         .await?;
-        let settings = guard::settings(
+        if request.session.fast_mode && !supports_fast_mode(&request.session.model) {
+            return Err(failure(
+                "Скоростной режим недоступен для выбранной модели Claude",
+                None,
+            ));
+        }
+        let mut settings = guard::settings(
             &bridge.pipe,
             &std::env::current_exe()?,
             &request.session.permission_profile,
         );
+        settings["fastMode"] = json!(request.session.fast_mode);
         let mode = guard::permission_mode(&request.session.permission_profile);
         let mut command = self.command(Some(&request.account))?;
         command.current_dir(&root).args([
@@ -649,6 +664,7 @@ impl ClaudeProvider {
                 }
             })?;
         let mut state = mapping::StreamState::new(request.output_schema.is_some());
+        let mut usage_emitted = false;
         let deadline = tokio::time::sleep(Duration::from_secs(3600));
         tokio::pin!(deadline);
         loop {
@@ -662,6 +678,12 @@ impl ClaudeProvider {
                     .is_some_and(|actual| actual != mode)
             {
                 return Err(failure("Claude не применил выбранный режим доступа. Проверьте политику Claude Code; режим автоматически не заменяется.", None));
+            }
+            if !usage_emitted {
+                if let Some(usage) = mapping::reported_usage(&value) {
+                    usage_emitted = true;
+                    tokio::select! { _ = cancel.cancelled() => return Ok(()), sent = events.send(usage) => { if sent.is_err() { return Ok(()); } } }
+                }
             }
             for payload in state.accept(value)? {
                 tokio::select! { _ = cancel.cancelled() => return Ok(()), sent = events.send(payload) => { if sent.is_err() { return Ok(()); } } }

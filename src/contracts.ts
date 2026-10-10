@@ -34,6 +34,7 @@ export interface Session {
   created_at: number;
   updated_at: number;
   reasoning_effort: string | null;
+  fast_mode?: boolean;
   tool_policy: string;
   parent_session_id: string | null;
   chat_mode: 'single' | 'team' | 'auto' | 'task';
@@ -50,6 +51,7 @@ export interface AgentConfig {
   account_profile_id: string;
   model: string;
   reasoning_effort: string | null;
+  fast_mode?: boolean;
   permission_profile: string;
   tools: ToolPolicy;
   role: string;
@@ -71,6 +73,26 @@ export type EventPayload =
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'progress_delta'; text: string }
   | { type: 'model_resolved'; model: string }
+  | { type: 'run_changes'; files: ChangedFile[]; limited: boolean }
+  | {
+      type: 'provider_run_started';
+      provider: string;
+      model: string;
+      purpose: string;
+      resumed: boolean;
+      prompt_bytes: number;
+    }
+  | {
+      type: 'provider_usage';
+      provider: string;
+      model_requests: number | null;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      cache_read_tokens: number | null;
+      cache_creation_tokens: number | null;
+      reasoning_tokens?: number | null;
+      incomplete?: boolean;
+    }
   | { type: 'user_attachments'; files: { name: string; path: string; mime: string }[] }
   | {
       type: 'team_message';
@@ -87,6 +109,7 @@ export type EventPayload =
       model: string;
       account_profile_id: string;
       reasoning_effort: string | null;
+      fast_mode?: boolean;
     }
   | { type: 'tool_activity'; label: string; detail: string }
   | {
@@ -144,6 +167,14 @@ export interface ModelInfo {
   is_default: boolean;
   reasoning_efforts?: string[];
   default_reasoning_effort?: string | null;
+  fast_mode_available?: boolean;
+}
+
+export interface ChangedFile {
+  path: string;
+  status: 'added' | 'deleted' | 'modified';
+  added: number | null;
+  removed: number | null;
 }
 export interface ExtensionItem {
   id?: string;

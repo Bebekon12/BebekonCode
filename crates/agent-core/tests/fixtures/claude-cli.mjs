@@ -72,6 +72,7 @@ fs.appendFileSync(
     tools: option('--tools'),
     model: option('--model'),
     effort: args.includes('--effort') ? option('--effort') : null,
+    fast_mode: settings.fastMode,
   }) + '\n',
 );
 send({
@@ -134,5 +135,18 @@ if (args.includes('--json-schema')) {
     type: 'assistant',
     message: { content: [{ type: 'text', text: 'Claude fixture result' }] },
   });
-  send({ type: 'result', subtype: 'success', result: 'Claude fixture result' });
+  send({
+    type: 'result',
+    subtype: 'success',
+    result: 'Claude fixture result',
+    num_turns: 2,
+    usage: {
+      input_tokens: 10,
+      output_tokens: 8,
+      cache_read_input_tokens: 20,
+      cache_creation_input_tokens: 30,
+    },
+    modelUsage: { 'claude-opus-5-5': { inputTokens: 100000 } },
+    total_cost_usd: 12,
+  });
 }

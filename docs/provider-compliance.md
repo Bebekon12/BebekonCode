@@ -1,5 +1,130 @@
 # Provider compliance
 
+## Explicit local context transfer fix (checked 2026-10-10)
+
+Rechecked the official [Codex app-server reference](https://learn.chatgpt.com/docs/app-server),
+[Claude headless operation](https://code.claude.com/docs/en/headless) and
+[Claude permissions](https://code.claude.com/docs/en/permissions). Provider threads remain
+provider/account-specific; a user-selected cross-provider transfer starts a fresh target thread
+with app-owned local history in its first prompt, never with the other provider's thread ID.
+
+- Transfer no longer requests a summary from the source account. Saved, bounded, redacted
+  history includes public worker messages and partial work even when the source hits a quota.
+  No inference or fallback account is used during the transfer itself.
+- The transfer dialog explicitly states that execution continues with one selected agent.
+  The root chat's mode and binding change atomically; former team configurations/history remain
+  stored and are not automatically scheduled. Child accounts and permissions are not changed.
+  Chat and child leases reject transfer while a separately started member is active.
+- Errors and cancellation before committing leave the original binding intact. Missing or
+  invalid target models/tools still fail validation. New replies retain actual configuration
+  events. Historical handoff snapshots are not recursively embedded into new snapshots.
+- Claude's reported `session limit` errors are classified as `usage_limit`. They remain visible
+  failures and never trigger automatic retry or account/provider substitution.
+- Claude confirmations follow the explicitly selected access mode, including the previously
+  published opt-in full access. This fix prevents stale workers after a user-selected transfer;
+  it does not add permission bypasses. Computer use still requires per-action consent.
+
+This supersedes earlier descriptions of source-provider summarisation during handoff.
+Regression tests use labelled test engines; they do not claim live subscription inference.
+
+Validation on 2026-10-10: `cargo fmt --all -- --check`, `cargo check`, `cargo test`
+(85 passed, 5 explicitly ignored live-provider tests), `cargo clippy -- -D warnings`,
+`npm run typecheck`, `npm test` (38 passed), `npm run build`, and the chat/Claude
+Playwright scenarios (4 chat scenarios plus the corrected Claude transfer scenario passed).
+The initial Rust run exhausted drive D; package-scoped Cargo build artifacts were cleaned
+and all Rust checks were repeated successfully. No installed application update or live
+quota-consuming provider turn was performed for this fix.
+
+Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
+
+- No web scraping or browser cookie extraction.
+- No undocumented consumer APIs or provider impersonation.
+- No reverse-engineered authentication or copied official-client credentials.
+- No automatic quota rotation, hidden account fallback or rate-limit circumvention.
+- No credential sharing or export.
+- No secret logging and no plaintext token persistence in SQLite/config/frontend.
+- No disabling provider safeguards by default.
+
+## Speed preferences, local change snapshots and Claude usage audit (checked 2026-10-10)
+
+Codex follow-up audit rechecked the official [app-server contract](https://learn.chatgpt.com/docs/app-server)
+and installed CLI 0.160.1 generated stable schemas on 2026-10-10. Existing account-bound
+`thread/resume` already preserves conversations; single turns append only current input.
+The follow-up consumes `thread/tokenUsage/updated` locally and retains numeric counters only.
+Thread `total` is cumulative and `last` is the latest model request, not the entire user turn.
+Usage must be calculated against a known pre-turn baseline, exclude replayed/other-thread
+events, and mark missing baselines/counter resets as incomplete. No token-to-quota conversion,
+new inference stage, credential access, polling loop or automatic account fallback is added.
+Existing ChatGPT rate-limit snapshots remain account-level information, not exact task bills.
+
+Release candidate 0.8.10 validation: workspace Rust fmt/check/test/Clippy passed (97 tests,
+5 provider-environment tests explicitly ignored), TypeScript, 42 frontend tests, production
+frontend build, version consistency and all 28 Playwright scenarios passed. Protocol fixtures
+verify same-thread resume, current-message-only input, exact Fast/default turn overrides,
+deduplication of cumulative usage and exclusion of a stale nested-turn completion. The release
+candidate was prepared separately on published 0.8.9; unfinished Smart Computer code is absent.
+Signed installer/signature/manifest auditing is performed by the release workflow before
+publication. No live quota-consuming Desktop comparison, paid Fast turn or installed upgrade
+on the user's running application is claimed.
+
+Official sources checked: [Codex speed](https://learn.chatgpt.com/docs/agent-configuration/speed),
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+[app-server](https://learn.chatgpt.com/docs/app-server), [Claude Fast](https://code.claude.com/docs/en/fast-mode),
+[headless operation](https://code.claude.com/docs/en/headless), and
+[shared Claude usage limits](https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work).
+The official installed Codex CLI 0.160.1 stable generated JSON schema exposes `Model.serviceTiers`,
+legacy `additionalSpeedTiers`, and `TurnStartParams.serviceTierForTurn` (explicit `default` for standard).
+Schema generation performs no inference and reads no credentials.
+
+Fast is an opt-in per-agent setting with a new migration; old sessions default to false. Codex
+availability comes from the bound account's actual model catalog, not a guessed model whitelist.
+The turn-only override selects `fast` or explicit `default` without editing account config or
+leaking a thread preference between chats. Claude uses documented `--settings` `fastMode` for
+fixed supported Opus IDs (5.5, 5 and 4.8), and explicitly false for standard; aliases are not
+claimed to support Fast. Claude Fast spends paid usage credits even with subscription allowance
+remaining: the UI must state this and require explicit opt-in before enabling. No paid account
+setting, credential, authentication route or automatic model/account fallback is changed.
+Quiet planning does not silently inherit paid Fast. Availability is a supported request path,
+not proof of account entitlement or actual acceleration; provider denial remains visible.
+
+Claude uses `--print` with `stream-json`, and resumes the stored, account-bound upstream ID.
+Single-chat messages do not append the whole app history on every resumed turn. Team and auto
+orchestration intentionally use additional sessions; the number of engine launches is not the
+number of internal model requests. Cache/input/output counters can be retained only when the
+official result reports them, without monetary-to-subscription conversions, fabricated quota
+percentages, raw responses, private thinking, or secrets. No measured Desktop/app multiplier
+is claimed without a controlled live comparison.
+
+Change cards must use a bounded local before/after snapshot of the current user turn, rather
+than the accumulated worktree diff. Existing uncommitted edits are baseline data. No Git index
+writes, commits, history rewrites or provider-generated claims are needed for this display.
+
+Snapshots retain file content in bounded memory only; the event log stores paths, status and
+line counts. Credential paths, reparse points, ignored files and Git internals are excluded.
+Counts for binary/oversized files may be unavailable; limits are disclosed. Changes made
+concurrently by another process in the same workspace are included in the before/after
+window, so the card does not claim exclusive attribution. Empty latest-turn snapshots clear
+the card rather than reusing old worktree changes. Historical replies are not backfilled
+from today's dirty worktree. See the [concrete Claude audit](claude-usage-audit.md).
+
+The official pinned SDK result declarations identify `usage` as per-turn main-agent-loop
+counters, excluding some sidechain/subagent requests; `modelUsage` and cost can be cumulative
+across resumed turns. Only numeric per-turn counters and observed app launches are retained.
+No polling, retry, model call, secret payload or monetary-to-plan conversion is added for
+these diagnostics. Fresh worker history, resumed coordinator history and team attachment
+descriptions were duplicated by application orchestration and have been corrected.
+
+Validation on 2026-10-10: `cargo fmt --all`, `cargo check` and `cargo check --workspace`
+(including Tauri), `cargo test` (92 passed, 5 explicitly ignored provider-environment tests),
+`cargo clippy -- -D warnings`, `npm run typecheck`, `npm test` (41 passed), `npm run build`,
+and six Playwright chat/Claude/Fast scenarios passed. The snapshot regression uses a real
+temporary Git directory and two application turns: old dirty files are excluded and a
+status-only reply has an empty persisted snapshot. Claude subprocess tests use the clearly
+labelled local CLI fixture, not subscription inference. Live acceptance/entitlement and
+actual acceleration for Fast have not been tested. No release or installed-app update was
+performed. New fields required an explicit false default in the existing Smart Computer
+example; that example was compiled by `cargo test` and its desktop actions were not run.
+
 Official documentation last checked: **2026-10-10**. This records technical integration research
 and the resulting design. It is not a claim of provider approval or a legal audit.
 

@@ -17,7 +17,7 @@ pub struct GitStatus {
 }
 
 /// Read-only Git runner; no shell, no external diff drivers, bounded output and lifetime.
-async fn read_git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+pub(crate) async fn read_git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let binary = which::which("git").map_err(|_| CoreError::Git)?;
     let mut command = Command::new(binary);
     command

@@ -218,6 +218,7 @@ export const preview: ClientTransport = {
       created_at: now(),
       updated_at: now(),
       reasoning_effort: null,
+      fast_mode: false,
       tool_policy: '{}',
       parent_session_id: null,
       chat_mode: 'single' as const,
@@ -251,6 +252,7 @@ export const preview: ClientTransport = {
       const stored = state.sessions.find((s) => s.id === session.id)!;
       Object.assign(stored, {
         reasoning_effort: agent.reasoning_effort,
+        fast_mode: agent.fast_mode ?? false,
         tool_policy: JSON.stringify(agent.tools),
         role: agent.role,
         chat_mode: index === 0 ? input.mode : 'single',
@@ -278,6 +280,8 @@ export const preview: ClientTransport = {
     if (!session || session.status === 'running') throw new Error('Чат занят');
     Object.assign(session, config, {
       tool_policy: JSON.stringify(config.tools),
+      chat_mode: 'single',
+      provider_session_id: null,
       context_summary: 'Предпросмотр: настоящая передача контекста работает в приложении.',
     });
     return crypto.randomUUID();
@@ -317,6 +321,7 @@ export const preview: ClientTransport = {
       model: session.model,
       account_profile_id: session.account_profile_id,
       reasoning_effort: session.reasoning_effort,
+      fast_mode: session.fast_mode ?? false,
     });
     void (async () => {
       // Preview-only sample rows for UI work; nothing here touches the disk.
@@ -450,6 +455,7 @@ export const preview: ClientTransport = {
         name: `Claude ${id}`,
         description: 'Псевдоним CLI · предпросмотр',
         is_default: id === 'sonnet',
+        fast_mode_available: id === 'claude-opus-5-5',
         reasoning_efforts:
           id === 'claude-opus-4-6'
             ? ['low', 'medium', 'high', 'max']
@@ -460,6 +466,7 @@ export const preview: ClientTransport = {
         id: 'preview-model',
         name: 'Модель предпросмотра',
         description: 'Имитация каталога Codex',
+        fast_mode_available: true,
         is_default: true,
         reasoning_efforts: ['low', 'medium', 'high'],
       },

@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-core"
-version = "0.8.9"
+version = "0.8.10"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -291,7 +291,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bebekoncode-desktop"
-version = "0.8.9"
+version = "0.8.10"
 dependencies = [
  "agent-core",
  "serde",

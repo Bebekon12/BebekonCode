@@ -185,6 +185,7 @@ mod tests {
             closed.cancelled().await;
         });
         Arc::new(AppServer {
+            usage_totals: Mutex::default(),
             peer,
             operation: tokio::sync::Mutex::new(()),
             sandbox: Mutex::default(),

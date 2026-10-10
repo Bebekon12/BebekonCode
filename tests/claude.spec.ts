@@ -48,6 +48,18 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   ).toBeEnabled();
   await expect(root.getByLabel('Модель', { exact: true })).toHaveValue('sonnet');
   await root.getByLabel('Модель', { exact: true }).selectOption('opus');
+  await expect(root.getByRole('button', { name: 'Скоростной режим', exact: true })).toBeDisabled();
+  await root.getByLabel('Модель', { exact: true }).selectOption('claude-opus-5-5');
+  const fast = root.getByRole('button', { name: 'Скоростной режим', exact: true });
+  await fast.click();
+  const fastWarning = page.getByRole('dialog', { name: 'Включить скоростной режим' });
+  await expect(fastWarning).toContainText('дополнительных usage credits');
+  await expect(fastWarning).toContainText('лимит подписки ещё не исчерпан');
+  await fastWarning.getByRole('button', { name: 'Включить Fast', exact: true }).click();
+  await expect(fast).toHaveAttribute('aria-pressed', 'true');
+  await root.getByLabel('Модель', { exact: true }).selectOption('opus');
+  await expect(fast).toBeDisabled();
+  await expect(fast).toHaveAttribute('aria-pressed', 'false');
   await root.getByLabel('Уровень обдумывания', { exact: true }).fill('3');
   await worker.locator('.agent-card-toggle').click();
   await worker.getByLabel('Провайдер', { exact: true }).selectOption('openai');
@@ -93,11 +105,16 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   const chats = await page.locator('.recent-chat').count();
   await page.getByRole('button', { name: 'Перейти', exact: true }).click();
   const handoff = page.getByRole('dialog', { name: 'Перейти с контекстом' });
+  await expect(handoff).toContainText('прежняя команда автоматически не запускается');
   await handoff.getByLabel('Доступ', { exact: true }).selectOption('full_access');
   await expect(handoff.getByRole('alert')).toContainText('Учётные данные запрещены');
   await handoff.getByLabel('Провайдер', { exact: true }).selectOption('openai');
   await expect(handoff.getByLabel('Доступ', { exact: true })).toHaveValue('standard');
   await handoff.getByRole('button', { name: 'Перейти с контекстом', exact: true }).click();
-  await expect(page.locator('.composer-agent').first()).toContainText('preview-model');
+  await expect(page.locator('.composer-agent')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Модель в чате', exact: true })).toContainText(
+    'Модель предпросмотра',
+  );
+  await expect(page.locator('.team-panel')).toHaveCount(0);
   await expect(page.locator('.recent-chat')).toHaveCount(chats);
 });

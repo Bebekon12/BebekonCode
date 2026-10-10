@@ -9,6 +9,42 @@ const event = (sequence: number, run_id: string, payload: EventPayload): AgentEv
   timestamp: 0,
 });
 describe('event replay', () => {
+  it('keeps per-message snapshots and usage diagnostics separate from earlier turns', () => {
+    const turns = buildTimeline([
+      event(1, 'old', { type: 'turn_started', prompt: 'Edit' }),
+      event(2, 'old', {
+        type: 'run_changes',
+        files: [{ path: 'old.rs', status: 'modified', added: 5, removed: 1 }],
+        limited: false,
+      }),
+      event(3, 'old', { type: 'turn_completed' }),
+      event(4, 'latest', { type: 'turn_started', prompt: 'Status only' }),
+      event(5, 'latest', {
+        type: 'provider_run_started',
+        provider: 'anthropic',
+        model: 'opus',
+        purpose: 'execution',
+        resumed: true,
+        prompt_bytes: 40,
+      }),
+      event(6, 'latest', {
+        type: 'provider_usage',
+        provider: 'anthropic',
+        model_requests: 1,
+        input_tokens: 12,
+        output_tokens: 14,
+        cache_read_tokens: 50,
+        cache_creation_tokens: null,
+      }),
+      event(7, 'latest', { type: 'run_changes', files: [], limited: false }),
+      event(8, 'latest', { type: 'turn_completed' }),
+    ]);
+    expect(turns[0]?.changes?.files[0]?.path).toBe('old.rs');
+    expect(turns[1]?.changes?.files).toEqual([]);
+    expect(turns[1]?.providerRuns).toHaveLength(1);
+    expect(turns[1]?.usage[0]?.cache_creation_tokens).toBeNull();
+    expect(turns[0]?.usage).toEqual([]);
+  });
   it('preserves provider approval choices including an empty subset', () => {
     const request = {
       type: 'approval_requested' as const,

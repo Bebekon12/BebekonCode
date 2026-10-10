@@ -31,6 +31,10 @@ export interface TimelineTurn {
   provider?: string;
   model?: string;
   reasoningEffort?: string | null;
+  fastMode?: boolean;
+  changes?: { files: import('./contracts').ChangedFile[]; limited: boolean };
+  providerRuns: Extract<import('./contracts').EventPayload, { type: 'provider_run_started' }>[];
+  usage: Extract<import('./contracts').EventPayload, { type: 'provider_usage' }>[];
   attachments: { name: string; path: string; mime: string }[];
   activities: TimelineActivity[];
   status: SessionStatus;
@@ -63,6 +67,8 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
         attachments: [],
         activities: [],
         approvals: [],
+        providerRuns: [],
+        usage: [],
         status: 'running',
         startedAt: event.timestamp,
       };
@@ -108,6 +114,16 @@ export function buildTimeline(events: AgentEvent[]): TimelineTurn[] {
         turn.provider = event.payload.provider;
         turn.model = event.payload.model;
         turn.reasoningEffort = event.payload.reasoning_effort;
+        turn.fastMode = event.payload.fast_mode ?? false;
+        break;
+      case 'run_changes':
+        turn.changes = { files: event.payload.files, limited: event.payload.limited };
+        break;
+      case 'provider_run_started':
+        turn.providerRuns.push(event.payload);
+        break;
+      case 'provider_usage':
+        turn.usage.push(event.payload);
         break;
       case 'tool_activity':
         turn.activities.push({
