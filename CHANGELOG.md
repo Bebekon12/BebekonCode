@@ -4,7 +4,7 @@ Every release links to a version tag and includes the same reviewed notes in Git
 
 ## Unreleased
 
-## 0.8.16 — 2026-10-15
+## 0.8.17 — 2026-10-15
 
 - Чат в стиле Claude Desktop: текст ответа и действия идут по порядку; команды, чтение и правки
   сворачиваются в строки вида «3 команды, изменён App.tsx +4 −1»; список целей агента показан

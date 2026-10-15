@@ -1114,13 +1114,13 @@ mod queue_cancellation_regression {
             .unwrap();
         core.change_queued_task("old", false).await.unwrap();
         assert!(old.is_cancelled());
+        // The mock turn may already have finished and left the registry: then it is not cancelled.
         assert!(!core
             .runs
             .lock()
             .unwrap()
             .get(&session.id)
-            .unwrap()
-            .is_cancelled());
+            .is_some_and(|token| token.is_cancelled()));
         core.cancel(&session.id).unwrap();
         core.shutdown().await;
     }
