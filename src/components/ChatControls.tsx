@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRightLeft, Puzzle } from 'lucide-react';
 import type { AgentConfig, ClientTransport, ModelInfo, Session } from '../contracts';
 import { sessionConfig } from '../chat';
@@ -14,6 +14,7 @@ export function ChatControls({
   settings,
   handoff,
   team = false,
+  contextControl,
 }: {
   client: ClientTransport;
   session: Session;
@@ -22,6 +23,7 @@ export function ChatControls({
   settings: () => void;
   handoff: () => void;
   team?: boolean;
+  contextControl?: ReactNode;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [error, setError] = useState('');
@@ -42,15 +44,28 @@ export function ChatControls({
     <div className="chat-controls">
       <div className="chat-control-fields">
         {!team && (
-          <ModelPicker
-            models={models}
-            model={session.model}
-            effort={session.reasoning_effort}
-            disabled={disabled}
-            change={(model, reasoning_effort) =>
-              configure({ ...sessionConfig(session), model, reasoning_effort })
-            }
-          />
+          <div className="chat-model-context">
+            <ModelPicker
+              models={models}
+              model={session.model}
+              effort={session.reasoning_effort}
+              provider={session.provider}
+              fastMode={session.fast_mode ?? false}
+              changeFastMode={(fast_mode) => configure({ ...sessionConfig(session), fast_mode })}
+              disabled={disabled}
+              change={(model, reasoning_effort) =>
+                configure({
+                  ...sessionConfig(session),
+                  model,
+                  reasoning_effort,
+                  fast_mode:
+                    !!session.fast_mode &&
+                    !!models.find((item) => item.id === model)?.fast_mode_available,
+                })
+              }
+            />
+            {contextControl}
+          </div>
         )}
         <AccessPicker
           value={session.permission_profile}

@@ -37,8 +37,10 @@ export function ChatSettings({
     <Dialog title={handoff ? 'Перейти с контекстом' : 'Настройки агента'} close={close}>
       <p className="muted dialog-description">
         {handoff
-          ? 'Текущий агент перескажет задачу, решения и следующий шаг. История останется в этом чате. Переход произойдёт только после успешной передачи.'
-          : 'Изменения применятся со следующего сообщения. История чата сохраняется.'}
+          ? 'История передаётся выбранному агенту локально, даже при исчерпанном лимите.'
+          : session.chat_mode === 'task'
+            ? 'Подзадача: настройки меняются в составе команды.'
+            : 'Применится со следующего сообщения.'}
       </p>
       <AgentPicker
         client={client}
@@ -46,7 +48,10 @@ export function ChatSettings({
         value={value}
         change={setValue}
         lockedAccount={!handoff}
-        worker={!!session.parent_session_id}
+        participant={!!session.parent_session_id}
+        worker={data.sessions.some(
+          (s) => s.id === session.parent_session_id && s.chat_mode === 'auto',
+        )}
         initialToolsOpen={initialToolsOpen}
       />
       <div className="dialog-footer">
@@ -55,7 +60,7 @@ export function ChatSettings({
         </button>
         <button
           className="primary-button"
-          disabled={busy || !valid || session.status === 'running'}
+          disabled={busy || !valid || session.status === 'running' || session.chat_mode === 'task'}
           onClick={() => save(value, handoff || changedAccount)}
         >
           {handoff ? 'Перейти с контекстом' : 'Сохранить'}

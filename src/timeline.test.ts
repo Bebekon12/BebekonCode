@@ -9,6 +9,42 @@ const event = (sequence: number, run_id: string, payload: EventPayload): AgentEv
   timestamp: 0,
 });
 describe('event replay', () => {
+  it('keeps per-message snapshots and usage diagnostics separate from earlier turns', () => {
+    const turns = buildTimeline([
+      event(1, 'old', { type: 'turn_started', prompt: 'Edit' }),
+      event(2, 'old', {
+        type: 'run_changes',
+        files: [{ path: 'old.rs', status: 'modified', added: 5, removed: 1 }],
+        limited: false,
+      }),
+      event(3, 'old', { type: 'turn_completed' }),
+      event(4, 'latest', { type: 'turn_started', prompt: 'Status only' }),
+      event(5, 'latest', {
+        type: 'provider_run_started',
+        provider: 'anthropic',
+        model: 'opus',
+        purpose: 'execution',
+        resumed: true,
+        prompt_bytes: 40,
+      }),
+      event(6, 'latest', {
+        type: 'provider_usage',
+        provider: 'anthropic',
+        model_requests: 1,
+        input_tokens: 12,
+        output_tokens: 14,
+        cache_read_tokens: 50,
+        cache_creation_tokens: null,
+      }),
+      event(7, 'latest', { type: 'run_changes', files: [], limited: false }),
+      event(8, 'latest', { type: 'turn_completed' }),
+    ]);
+    expect(turns[0]?.changes?.files[0]?.path).toBe('old.rs');
+    expect(turns[1]?.changes?.files).toEqual([]);
+    expect(turns[1]?.providerRuns).toHaveLength(1);
+    expect(turns[1]?.usage[0]?.cache_creation_tokens).toBeNull();
+    expect(turns[0]?.usage).toEqual([]);
+  });
   it('preserves provider approval choices including an empty subset', () => {
     const request = {
       type: 'approval_requested' as const,
@@ -121,5 +157,95 @@ describe('approvals and provider errors', () => {
     ]);
     expect(turn?.status).toBe('failed');
     expect(turn?.errorKind).toBe('usage_limit');
+  });
+});
+
+it('keeps unresolved approvals visible through every filter and search', () => {
+  const turns = buildTimeline([
+    event(1, 'pending', { type: 'turn_started', prompt: 'Modify' }),
+    event(2, 'pending', {
+      type: 'approval_requested',
+      id: 'a',
+      kind: 'command',
+      title: 'Shell',
+      detail: 'npm test',
+      cwd: null,
+      reason: null,
+    }),
+  ]);
+  for (const filter of ['all', 'agent', 'tools'] as const) {
+    expect(filterTimeline(turns, filter, 'no match')).toHaveLength(1);
+  }
+  const resolved = buildTimeline([
+    event(1, 'pending', {
+      type: 'approval_requested',
+      id: 'a',
+      kind: 'command',
+      title: 'Shell',
+      detail: 'npm test',
+      cwd: null,
+      reason: null,
+    }),
+    event(2, 'pending', { type: 'approval_resolved', id: 'a', decision: 'deny' }),
+  ]);
+  expect(filterTimeline(resolved, 'all', 'no match')).toHaveLength(0);
+});
+describe('desktop-style turn parts', () => {
+  it('interleaves text and tool groups and folds the task list across turns', () => {
+    const turns = buildTimeline([
+      event(1, 'a', { type: 'turn_started', prompt: 'Fix' }),
+      event(2, 'a', { type: 'assistant_text_delta', text: 'Looking. ' }),
+      event(3, 'a', {
+        type: 'tool_started',
+        id: 't1',
+        tool: 'Bash',
+        kind: 'command',
+        summary: 'npm test',
+      }),
+      event(4, 'a', {
+        type: 'tool_started',
+        id: 't2',
+        tool: 'Edit',
+        kind: 'edit',
+        summary: 'a.ts',
+        added: 2,
+        removed: 1,
+      }),
+      event(5, 'a', { type: 'tool_finished', id: 't1', failed: true }),
+      event(6, 'a', {
+        type: 'todo_update',
+        replace: false,
+        items: [{ id: '1', content: 'Build', status: 'pending' }],
+      }),
+      event(7, 'a', { type: 'assistant_text_delta', text: 'Done.' }),
+      event(8, 'a', { type: 'turn_completed' }),
+      event(9, 'b', { type: 'turn_started', prompt: 'Continue' }),
+      event(10, 'b', {
+        type: 'todo_update',
+        replace: false,
+        items: [{ id: '1', status: 'completed' }],
+      }),
+      event(11, 'b', {
+        type: 'tool_started',
+        id: 't3',
+        tool: 'Read',
+        kind: 'read',
+        summary: 'b.ts',
+      }),
+    ]);
+    const [first, second] = turns;
+    expect(first?.parts.map((part) => part.kind)).toEqual(['text', 'tools', 'todos', 'text']);
+    const tools = first?.parts[1];
+    expect(tools?.kind === 'tools' && tools.items.map((item) => item.state)).toEqual([
+      'failed',
+      'done',
+    ]);
+    const todos = second?.parts.find((part) => part.kind === 'todos');
+    expect(todos?.kind === 'todos' && todos.items).toEqual([
+      { key: 't1', content: 'Build', status: 'completed' },
+    ]);
+    const running = second?.parts.at(-1);
+    expect(running?.kind === 'tools' && running.items[0]?.state).toBe('running');
+    expect(first?.text).toBe('Looking. Done.');
   });
 });

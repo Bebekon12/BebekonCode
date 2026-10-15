@@ -5,6 +5,32 @@ import { checkUpdate, installUpdate } from './updates';
 import type { AccountEvent, AgentEvent, ClientTransport } from './contracts';
 
 export const desktop: ClientTransport = {
+  taskQueue: () => invoke('task_queue'),
+  configureConversation: (sessionId, settings) =>
+    invoke('configure_conversation', { sessionId, settings }),
+  steerMessage: (sessionId, expectedRun, prompt, attachments) =>
+    invoke('steer_message', { sessionId, expectedRun, prompt, attachments }),
+  enqueueMessage: (sessionId, prompt, attachments) =>
+    invoke('enqueue_message', { sessionId, prompt, attachments }),
+  editQueuedTask: (id, prompt, direction) => invoke('edit_queued_task', { id, prompt, direction }),
+  enqueueTask: (sessionId, prompt) => invoke('enqueue_task', { sessionId, prompt }),
+  changeQueuedTask: (id, resume) => invoke('change_queued_task', { id, resume }),
+  checkpoints: (sessionId) => invoke('checkpoints', { sessionId }),
+  createCheckpoint: (sessionId, label) => invoke('create_checkpoint', { sessionId, label }),
+  checkpointDiff: (sessionId, id) => invoke('checkpoint_diff', { sessionId, id }),
+  restoreCheckpointFile: (sessionId, id, path, expected) =>
+    invoke('restore_checkpoint_file', { sessionId, id, path, expected }),
+  deleteCheckpoint: (sessionId, id) => invoke('delete_checkpoint', { sessionId, id }),
+  branchChat: (sessionId, isolated) => invoke('branch_chat', { sessionId, isolated }),
+  projectFileRules: (sessionId) => invoke('project_file_rules', { sessionId }),
+  saveProjectFileRules: (sessionId, rules) =>
+    invoke('save_project_file_rules', { sessionId, rules }),
+  computerStatus: () => invoke('computer_status'),
+  installUnityAdapter: (root) => invoke('install_unity_adapter', { root }),
+  computerWindows: () => invoke('computer_windows'),
+  configureComputer: (sessionId, windows) => invoke('configure_computer', { sessionId, windows }),
+  stopComputer: () => invoke('stop_computer'),
+  approveComputer: (id, allow, sensitive) => invoke('approve_computer', { id, allow, sensitive }),
   accountMcp: (accountId) => invoke('account_mcp', { accountId }),
   saveAccountMcp: (accountId, servers) => invoke('save_account_mcp', { accountId, servers }),
   attachmentImage: (sessionId, path) => invoke('attachment_image', { sessionId, path }),

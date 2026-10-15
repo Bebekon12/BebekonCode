@@ -1,14 +1,5 @@
-import { forwardRef, useRef, useState, type ReactNode } from 'react';
-import {
-  ArrowUp,
-  ArrowUpRight,
-  Square,
-  Paperclip,
-  FileText,
-  X,
-  LoaderCircle,
-  Info,
-} from 'lucide-react';
+import { forwardRef, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowUp, ArrowUpRight, Square, Plus, FileText, X, LoaderCircle } from 'lucide-react';
 import { ImagePreview } from './ImagePreview';
 import type { ExtensionItem } from '../contracts';
 import {
@@ -24,8 +15,13 @@ export const Composer = forwardRef<
     draft: string;
     setDraft: (value: string) => void;
     running: boolean;
+    followupMode?: 'queue' | 'steer';
+    canSteer?: boolean;
+    liveHint?: string;
+    setFollowupMode?: (mode: 'queue' | 'steer') => void;
     busy: boolean;
-    send: () => void;
+    /** While running: `steer` adds to the current turn, `queue` waits for the next one. */
+    send: (mode?: 'queue' | 'steer') => void;
     cancel: () => void;
     controls: ReactNode;
     demo: boolean;
@@ -42,6 +38,7 @@ export const Composer = forwardRef<
     draft,
     setDraft,
     running,
+    canSteer = false,
     busy,
     send,
     cancel,
@@ -57,6 +54,25 @@ export const Composer = forwardRef<
   ref,
 ) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement | null>(null);
+  // Grow with the text like Claude Desktop, then scroll inside the field.
+  useLayoutEffect(() => {
+    const element = input.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    const limit = Math.max(160, Math.round(window.innerHeight * 0.42));
+    element.style.height = `${Math.min(element.scrollHeight, limit)}px`;
+    element.style.overflowY = element.scrollHeight > limit ? 'auto' : 'hidden';
+  }, [draft]);
+  const setInput = (element: HTMLTextAreaElement | null) => {
+    input.current = element;
+    if (typeof ref === 'function') ref(element);
+    else if (ref) ref.current = element;
+  };
+  const submit = (queue: boolean) => {
+    if (reading || busy || (!draft.trim() && !attachments.length)) return;
+    send(running ? (queue || !canSteer ? 'queue' : 'steer') : undefined);
+  };
   const [image, setImage] = useState<DraftAttachment>();
   const [error, setError] = useState('');
   const mention = draft.match(/@([A-Za-z0-9-]*)$/)?.[1];
@@ -64,7 +80,7 @@ export const Composer = forwardRef<
   const [dragging, setDragging] = useState(false);
   const readingRef = useRef(false);
   const attach = async (files: File[]) => {
-    if (running || busy || readingRef.current || !files.length) return;
+    if (busy || readingRef.current || !files.length) return;
     readingRef.current = true;
     setError('');
     setReading(true);
@@ -91,8 +107,8 @@ export const Composer = forwardRef<
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) {
             event.preventDefault();
-            event.dataTransfer.dropEffect = running || busy ? 'none' : 'copy';
-            setDragging(!running && !busy);
+            event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+            setDragging(!busy);
           }
         }}
         onDragLeave={(event) => {
@@ -111,7 +127,7 @@ export const Composer = forwardRef<
           multiple
           tabIndex={-1}
           aria-label="Выбрать вложения"
-          disabled={running || busy || reading}
+          disabled={busy || reading}
           onChange={(event) => {
             void attach(Array.from(event.target.files ?? []));
             event.target.value = '';
@@ -144,7 +160,7 @@ export const Composer = forwardRef<
                   type="button"
                   className="icon-button"
                   aria-label={`Убрать ${file.name}`}
-                  disabled={running || busy || reading}
+                  disabled={busy || reading}
                   onClick={() => setAttachments(attachments.filter((item) => item.id !== file.id))}
                 >
                   <X size={14} />
@@ -155,7 +171,7 @@ export const Composer = forwardRef<
         )}
         {running && mcpActive && (
           <p role="status" className="notice">
-            MCP активен · каждый внешний вызов с подтверждением. Кнопка остановки завершает процесс.
+            MCP активен
           </p>
         )}
         {mention !== undefined && !running && (
@@ -177,65 +193,71 @@ export const Composer = forwardRef<
             )}
           </div>
         )}
-        <textarea
-          ref={ref}
-          aria-label="Сообщение агенту"
-          placeholder={
-            running
-              ? 'Агент работает. Дождитесь ответа или остановите его.'
-              : 'Опишите задачу, задайте вопрос или предложите идею…'
-          }
-          value={draft}
-          maxLength={16000}
-          disabled={running}
-          onChange={(event) => setDraft(event.target.value)}
-          onPaste={(event) => {
-            const files = Array.from(event.clipboardData.files);
-            if (files.length) {
-              event.preventDefault();
-              void attach(files);
-            }
-          }}
-          onKeyDown={(event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-              event.preventDefault();
-              if (!reading) send();
-            }
-          }}
-        />
-        <div className="composer-toolbar">
+        <div className="composer-row">
           <button
             className="icon-button attach-button"
             type="button"
             aria-label="Прикрепить файлы"
-            title="Прикрепить файлы · можно перетащить или вставить изображение"
-            disabled={running || busy || reading}
+            title="Прикрепить файлы (можно перетащить или вставить)"
+            disabled={busy || reading}
             onClick={() => fileInput.current?.click()}
           >
-            {reading ? <LoaderCircle size={18} className="spin" /> : <Paperclip size={18} />}
+            {reading ? <LoaderCircle size={18} className="spin" /> : <Plus size={19} />}
           </button>
-          <div className="composer-controls" aria-label="Параметры чата">
-            {controls}
-          </div>
-          {running ? (
+          <textarea
+            ref={setInput}
+            rows={1}
+            aria-label="Сообщение агенту"
+            placeholder={
+              running
+                ? canSteer
+                  ? 'Enter — уточнить задачу, Ctrl+Enter — в очередь'
+                  : 'Enter — добавить в очередь'
+                : 'Опишите задачу или задайте вопрос'
+            }
+            value={draft}
+            disabled={busy}
+            onChange={(event) => setDraft(event.target.value)}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files);
+              if (files.length) {
+                event.preventDefault();
+                void attach(files);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              submit(event.ctrlKey || event.metaKey);
+            }}
+          />
+          {running && (
             <button
               className="send-button stop-button"
               aria-label="Остановить агента"
+              title="Остановить"
               onClick={cancel}
             >
-              <Square size={18} />
-            </button>
-          ) : (
-            <button
-              className="send-button"
-              aria-label="Отправить сообщение"
-              title="Отправить сообщение (Ctrl+Enter)"
-              disabled={(!draft.trim() && !attachments.length) || busy || reading}
-              onClick={send}
-            >
-              <ArrowUp size={21} />
+              <Square size={14} />
             </button>
           )}
+          <button
+            className="send-button"
+            aria-label={
+              running
+                ? canSteer
+                  ? 'Передать уточнение'
+                  : 'Добавить в очередь'
+                : 'Отправить сообщение'
+            }
+            title={
+              running ? (canSteer ? 'Уточнить (Enter)' : 'В очередь (Enter)') : 'Отправить (Enter)'
+            }
+            disabled={(!draft.trim() && !attachments.length) || busy || reading}
+            onClick={() => submit(false)}
+          >
+            <ArrowUp size={18} />
+          </button>
         </div>
       </div>
       {error && (
@@ -243,42 +265,17 @@ export const Composer = forwardRef<
           {error}
         </p>
       )}
-      <div className="composer-caption">
-        <div className="composer-caption-info">
-          <details className="attachment-help composer-help">
-            <summary aria-label="О вложениях и контексте" title="Вложения и контекст">
-              <Info size={14} />
-            </summary>
-            <div className="composer-help-panel">
-              <p>
-                <strong>Вложения</strong>
-                <br />
-                Фото: PNG, JPEG, GIF, WebP до 4 МиБ каждое и до 6 МиБ суммарно. DOCX, XLSX и PPTX:
-                извлекаем текст без точного оформления. TXT, код и другие файлы передаются внутри
-                проекта. PDF, видео, аудио и старые Office-файлы можно прикрепить, но их анализ
-                зависит от доступных агенту инструментов. До 8 файлов, 20 МиБ на файл и 40 МиБ
-                суммарно.
-              </p>
-              <p>Контекст сжимается автоматически по мере заполнения.</p>
-            </div>
-          </details>
-          {demo ? (
-            <span className="muted" title="Локальный симулятор · для ответов ИИ подключите аккаунт">
-              Демо
-            </span>
-          ) : manageUsage ? (
-            <button
-              className="inline-link"
-              onClick={manageUsage}
-              title="Используется план ChatGPT · управлять использованием"
-            >
-              План ChatGPT <ArrowUpRight size={11} />
-            </button>
-          ) : null}
+      <div className="composer-meta">
+        <div className="composer-controls" aria-label="Параметры чата">
+          {controls}
         </div>
-        <span>
-          <kbd>Ctrl ↵</kbd> отправить
-        </span>
+        {demo ? (
+          <span className="muted small">Демо</span>
+        ) : manageUsage ? (
+          <button className="inline-link" onClick={manageUsage} title="Управлять использованием">
+            План ChatGPT <ArrowUpRight size={11} />
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -1,7 +1,254 @@
 # Provider compliance
 
-Official documentation last checked: **2026-10-09**. This records technical integration research
+Official documentation last checked: **2026-10-15** (non-interactive access modes; earlier dated sections retain their own scope). This records technical integration research
 and the resulting design. It is not a claim of provider approval or a legal audit.
+
+## Non-interactive access (2026-10-15, 0.8.15)
+
+Owner explicitly requested removal of repeated MCP and workspace_auto approvals. This section
+supersedes older descriptions of acceptEdits and mandatory per-call external MCP consent.
+Official references checked: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
+[app-server](https://learn.chatgpt.com/docs/app-server),
+[Claude permissions](https://code.claude.com/docs/en/permissions),
+[Claude hooks](https://code.claude.com/docs/en/hooks).
+
+- Codex workspace_auto sends approvalPolicy=never at thread start/resume and turn start,
+  retaining workspace-write. Full access remains danger-full-access + never. Unexpected
+  provider approval requests in either mode are declined without an approval card; no escalation.
+- Claude workspace_auto uses documented dontAsk plus permissions.allow for Edit, Write,
+  Bash, PowerShell and MCP. Strict MCP config contains only the user's selected servers.
+  The bridge validates file paths and credentials before deferring to native allow/deny rules.
+  Native Windows shell/MCP are not OS-sandboxed; file-tool boundaries cannot constrain shell scripts.
+- Full access retains bypassPermissions. Removed app-injected mcp__* ask and manual MCP
+  hook approval. Claude auto also no longer has an app-injected MCP ask; its native classifier
+  continues to apply. Neither mode is silently substituted for workspace_auto.
+- Unexpected PermissionRequest in workspace_auto/full_access is denied immediately rather than
+  approving a provider restriction or waiting for the user. Tools requiring user interaction
+  and managed policy restrictions may therefore be unavailable. No fallback to another mode/account.
+- Default/manual and read-only behavior remain unchanged. The built-in smart-computer bridge
+  is separate from user-selected external MCP and retains its explicit per-action confirmation.
+- Same settings apply to each participant's execution session in both team modes. No live
+  model calls are needed for tests. Validation results are recorded in the 0.8.15 report.
+
+## Participant permissions and long messages (2026-10-15, 0.8.14)
+
+Rechecked official [Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Claude permissions](https://code.claude.com/docs/en/permissions) and
+[CLI input](https://code.claude.com/docs/en/cli-reference).
+
+- The editor no longer imposes 16K UTF-16 characters and core send/steer/queue/edit no longer
+  impose 32K UTF-8 bytes. Text is preserved; actual model context/transport resource limits remain
+  the provider's responsibility and failures remain visible, with no automatic paid retry.
+- An explicitly configured team participant receives its selected access, tool policy,
+  effort and optional Fast. Full access still requires the existing visible per-participant warning;
+  it is never the default. A participant explicitly given write access works as an executor; read-only/Plan still disable external tools. Automatic team advisers default to read-only; the owner can explicitly grant standard/workspace access and supported tools. Full access and Fast remain unavailable for automatic workers.
+- Lane identity includes access/tools/Fast/context settings, so changing permissions cannot reuse
+  a previous lane with stale overrides. Read-only/Plan disable external tools as before; selecting
+  standard/workspace/full access makes supported selected tools effective. Unsupported Claude
+  plugin execution remains unavailable rather than being advertised as supported.
+- File writers run serially. The lead integrates completed work and does not repeat implementation
+  already performed by participants. No planner/review round, account switching, computer-access
+  exemption or additional provider endpoint is introduced. Existing histories/migrations are intact.
+
+## Context, follow-up input and rich answers (2026-10-14, 0.8.12)
+
+Official sources checked before changing provider behavior:
+[Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
+[steering and queuing](https://learn.chatgpt.com/docs/prompting),
+[Claude context across products](https://support.claude.com/en/articles/8606394-how-large-is-the-context-window-on-paid-claude-plans),
+[Claude environment variables](https://code.claude.com/docs/en/env-vars),
+[Claude status line](https://code.claude.com/docs/en/statusline),
+[Claude CLI](https://code.claude.com/docs/en/cli-reference),
+[SDK commands including compact](https://code.claude.com/docs/en/agent-sdk/slash-commands),
+[streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode),
+[ChatGPT web](https://learn.chatgpt.com/docs/web) and
+[visualizations](https://learn.chatgpt.com/docs/visualizations).
+
+- Context observations are separate from billing counters. Codex uses matching-turn `last.totalTokens`
+  and `modelContextWindow`; Claude uses latest main-message input including cache read/write, with
+  capacity only when `modelUsage.contextWindow` unambiguously reports it. No model-name lookup or
+  invented capacity. Compaction invalidates the last observation until a fresh measurement.
+- Per-chat settings request Codex `model_auto_compact_token_limit`, Claude
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`. These control compaction,
+  not model capability, pricing, entitlement or subscription quota. Managed policy can take priority.
+  An isolated official Codex 0.160.1 no-inference probe rejected JSON null for the token threshold
+  and accepted integer 200000; default therefore omits the override.
+- Explicit `/compact` invokes `thread/compact/start` for Codex and the built-in command through
+  Claude print stream input. Claude compaction has an empty tool list and no custom setting sources.
+  The UI warns about inference cost and lossy summarization before sending; tests never compact a
+  real signed-in provider session. Visible local history and project files are not rewound.
+- Live Codex input uses only `turn/steer`, the original thread and `expectedTurnId`. A per-run
+  bounded channel prevents a stale UI request reaching a newer run. Acceptance is shown only after
+  RPC acknowledgement, with no retry/fallback. Cancellation and run completion close the channel.
+- Claude live additions use documented `--input-format stream-json`, `--replay-user-messages`
+  and public `SDKUserMessage.uuid`/`SDKUserMessageReplay.uuid` from pinned SDK 0.3.295. The same CLI
+  process receives text/images; acceptance is shown only for a matching replay UUID. The engine
+  chooses delivery between tools or a following native turn, per the [interactive queue contract](https://code.claude.com/docs/en/interactive-mode#queue-messages-while-claude-works).
+  There is no forced interrupt, private control request or process restart. On the first terminal
+  result, input closes and already submitted native messages drain. Every distinct native result's
+  main-cycle usage contributes once; diagnostics aggregate these results without rebilling them.
+  EOF, unacknowledged messages, late input, cancellation and repeated acknowledgements are handled
+  explicitly. The separate application queue guarantees dispatch after the current app task.
+- Queued attachments are validated and stored as local files; SQLite contains metadata and SHA-256,
+  not file bodies. Dispatch rechecks paths and bytes. Edits/reordering are serialized against claim;
+  restart pauses pending work and a failed/stopped run pauses remaining tasks.
+- Rich replies are local Markdown, raster/HTTPS image presentation, source links and validated JSON
+  charts. No model-authenticated web endpoint, hidden reasoning, arbitrary HTML/JS, generated URLs,
+  background image generation or extra formatting model call is used. External images use anonymous
+  CORS, no referrer and lazy loading, with a visible source fallback if loading fails. Navigation is
+  a user click through validated public HTTPS URLs. Rendered links are not verified factual citations.
+- ChatGPT's web system prompt, exact output policy and private tooling are not reproduced. A visible
+  response-style preference appends a short instruction to the chosen provider; model, tools and
+  account remain the user's choice. No live ChatGPT conversation was sent for comparison.
+
+## Efficient teams and Codex follow-up (2026-10-14, 0.8.11)
+
+This section supersedes earlier planner/review-round and writable-worker descriptions.
+Rechecked the official [Codex app-server reference](https://learn.chatgpt.com/docs/app-server),
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference), and
+[Claude structured output reference](https://code.claude.com/docs/en/agent-sdk/structured-outputs).
+The installed Codex 0.160.1 public JSON schema generator, run in an isolated profile without
+inference, confirms `excludeTurns` on `thread/resume` and `thread/fork`.
+
+- Application teams use one implementing lead and up to two read-only advisers with distinct
+  scopes. There is no paid JSON planning call or automatic mutual review round. Exact short
+  continuations skip advisers. Specialist sessions are reused within the same explicitly bound
+  account/model/role configuration; no account fallback or quota retry is introduced.
+- Native Codex nested agents are disabled for team/task runs (`agents.enabled=false`);
+  approval reviewer remains the user. Read-only advisers have no external MCP/plugins/skills,
+  computer access or Fast mode. Claude advisers retain a restricted read-only tool set.
+- Codex resume excludes returned historical turns. Native fork uses documented `thread/fork`
+  without starting a turn. Claude uses the SDK's local `forkSession`; other providers retain
+  bounded public-context branches. No native transcript is extracted for the frontend.
+- Codex usage ignores events from other threads/turns. An unknown cold baseline is reported as
+  incomplete, never inferred from unrelated historical turn totals. Provider diagnostics are
+  metadata only and do not add their token counts to the usage totals a second time.
+- Public commentary is progress, final text remains the answer; completed items are deduplicated.
+  Actual model rerouting is displayed only when reported by the matching thread/turn.
+
+Evidence: fixture RPC/CLI tests and packaged mock orchestration. This establishes application
+behavior, not live provider output quality, subscription parity or measured token savings.
+
+## Follow-up: supported workflows and owner-approved Claude Bypass (2026-10-14)
+
+This supersedes the earlier audit's unsupported-mode/rule/branch statements. The owner
+explicitly extended AGENTS.md's full-access exception to Claude bypassPermissions on
+2026-10-14. It remains opt-in per chat with a visible warning. Read-only/Auto orchestration
+workers retain read-only overrides. MCP tools still require per-call consent through the hook,
+including in Bypass; the computer service retains its own per-action approval and indicator.
+File guards protect credential/service paths and account profiles, and direct credential
+shell commands are refused. Full access is not an OS security boundary against arbitrary code.
+
+Rechecked official [permission modes](https://code.claude.com/docs/en/permission-modes),
+[permission rules](https://code.claude.com/docs/en/permissions),
+[CLI options](https://code.claude.com/docs/en/cli-reference),
+[sessions](https://code.claude.com/docs/en/agent-sdk/sessions), and
+[checkpointing](https://code.claude.com/docs/en/checkpointing).
+The installed official SDK 0.3.295 declarations document the offline forkSession function.
+
+- Native CLI remains the inference/authentication owner. Manual, acceptEdits, plan, auto
+  and bypassPermissions are requested via documented options; only explicit Bypass omits
+  --restricted, which refuses that mode. CLI-reported permissionMode is displayed, without
+  claiming account/model entitlement to Auto. Plan retains a stricter file-read-only tool set.
+- Exact file rules are an explicit user configuration screen, not auto-accepted model suggestions.
+  They are profile/project-scoped and compiled into permissions.allow via --settings on each
+  launch. Removing a rule removes it from subsequent launches. File guards and provider deny
+  rules remain effective. This is not persistence through ignored project settings files.
+- SDK forkSession only mutates session files inside the explicitly bound application profile;
+  it does not call query, authenticate, send a prompt, or expose transcript/thinking to the UI.
+  Codex branches use documented thread/fork; other providers use bounded local public context.
+- Checkpoints are application-owned local text snapshots, not an undocumented provider rewind
+  endpoint. Content stays out of SQLite; excluded paths and detected secrets are skipped.
+  Restore requires explicit confirmation, checks current content, saves a recovery point, and
+  does not reset Git or delete newly created files. Limits/exclusions are visible.
+- Queue dispatch preserves captured configuration/account, serializes tasks, and pauses after
+  failures or process restart. No automatic quota retry, fallback account, or resume on restart.
+- Git worktree creation uses no-checkout and disables hooks; existing guarded local files are
+  copied without running checkout filters. There is no automatic merge, push, or cleanup that
+  deletes user work. Concurrent writers in the same/nested directory are refused until free.
+
+All validation is quota-free: fixture CLI processes, mock agents, generated transcripts and
+temporary Git projects. The local installer does not publish updater artifacts; production
+updater signature verification and existing release tags remain unchanged.
+
+## Claude chat audit and rendering (checked 2026-10-14)
+
+Rechecked official [CLI reference](https://code.claude.com/docs/en/cli-reference),
+[headless execution](https://code.claude.com/docs/en/headless),
+[permissions](https://code.claude.com/docs/en/permissions),
+[hooks](https://code.claude.com/docs/en/hooks),
+[sandboxing](https://code.claude.com/docs/en/sandboxing),
+[cost accounting](https://code.claude.com/docs/en/agent-sdk/cost-tracking) and
+[legal/compliance](https://code.claude.com/docs/en/legal-and-compliance).
+Also inspected installed official Agent SDK 0.3.295 public TypeScript declarations.
+
+- Retain the unmodified native CLI and its account-owned authentication. No Agent SDK
+  authentication migration, credential import, paid API switch, new endpoint or LLM loop.
+  CLI `--print` already uses the official agent engine and default system prompt. The SDK
+  `systemPrompt` preset recommendation does not justify replacing this working CLI route.
+- Exclude the current run from historical team context, since every stage receives the
+  current request explicitly. Remove its second copy in the team task description. Historical
+  goals/corrections remain preserved; no provider transcript is rewritten.
+- File grants now bind account + local chat + canonical file. Sign-out revokes that account's
+  grants only. An unexpected PermissionRequest under acceptEdits stays interactive even if a
+  previous manual grant exists. Shell/MCP and computer access still require fresh confirmation.
+- Restricted CLI loads managed and explicit settings only. Project/user permission suggestions
+  saved with `updatedPermissions` would not automatically load on the next restricted launch;
+  therefore persistent per-tool rules are explicitly unavailable, not falsely advertised as
+  "always allow". The persisted per-chat `workspace_auto` profile is real acceptEdits for
+  guarded project files. Native Auto, Plan and Bypass are not claimed as supported modes.
+- Content-free diagnostics accompany successful, failed and cancelled Claude invocations.
+  Reports carry app request/profile/session IDs, upstream session ID, requested/resolved model,
+  requested effort/access/Fast, duration, observed tool/approval/retry counts and per-turn
+  main-loop usage. `num_turns` is labelled CLI loop turns, not all HTTP requests. Unknown
+  usage remains null. Cumulative `modelUsage`/cost are still not added as independent turns.
+- Replay suppression uses provider UUIDs and tool-use IDs in bounded windows. Equal text with
+  distinct IDs remains intact. Raw inputs, tool results and thinking/signatures are not added
+  to diagnostic reports. Failure to persist an upstream session stops the run and reports an
+  error instead of silently continuing without resumable state.
+- Normal / progress / verbose views only re-render existing public events. They do not request
+  or invent private reasoning, reformat via inference, change effort, or alter provider access.
+  Approval cards remain visible through filters. Old file-change counts remain per-turn snapshots.
+
+The owner requested only tests without quota consumption. No live matched CLI/Desktop run,
+subscription savings claim, production release or installed-app replacement is part of this
+validation. Detailed findings and acceptance limits: [audit](claude-desktop-audit-2026-10-14.md).
+
+## Explicit local context transfer fix (checked 2026-10-10)
+
+Rechecked the official [Codex app-server reference](https://learn.chatgpt.com/docs/app-server),
+[Claude headless operation](https://code.claude.com/docs/en/headless) and
+[Claude permissions](https://code.claude.com/docs/en/permissions). Provider threads remain
+provider/account-specific; a user-selected cross-provider transfer starts a fresh target thread
+with app-owned local history in its first prompt, never with the other provider's thread ID.
+
+- Transfer no longer requests a summary from the source account. Saved, bounded, redacted
+  history includes public worker messages and partial work even when the source hits a quota.
+  No inference or fallback account is used during the transfer itself.
+- The transfer dialog explicitly states that execution continues with one selected agent.
+  The root chat's mode and binding change atomically; former team configurations/history remain
+  stored and are not automatically scheduled. Child accounts and permissions are not changed.
+  Chat and child leases reject transfer while a separately started member is active.
+- Errors and cancellation before committing leave the original binding intact. Missing or
+  invalid target models/tools still fail validation. New replies retain actual configuration
+  events. Historical handoff snapshots are not recursively embedded into new snapshots.
+- Claude's reported `session limit` errors are classified as `usage_limit`. They remain visible
+  failures and never trigger automatic retry or account/provider substitution.
+- Claude shell/MCP confirmation remains required on Windows. This fix prevents stale Claude
+  workers after a user-selected transfer; it does not bypass permissions. Codex full access
+  remains an explicitly confirmed per-chat choice, and computer use requires per-action consent.
+
+This supersedes earlier descriptions of source-provider summarisation during handoff.
+Regression tests use labelled test engines; they do not claim live subscription inference.
+
+Validation on 2026-10-10: `cargo fmt --all -- --check`, `cargo check`, `cargo test`
+(85 passed, 5 explicitly ignored live-provider tests), `cargo clippy -- -D warnings`,
+`npm run typecheck`, `npm test` (38 passed), `npm run build`, and the chat/Claude
+Playwright scenarios (4 chat scenarios plus the corrected Claude transfer scenario passed).
+The initial Rust run exhausted drive D; package-scoped Cargo build artifacts were cleaned
+and all Rust checks were repeated successfully. No installed application update or live
+quota-consuming provider turn was performed for this fix.
 
 Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 
@@ -12,6 +259,100 @@ Repository-wide prohibitions (also in [AGENTS.md](../AGENTS.md)):
 - No credential sharing or export.
 - No secret logging and no plaintext token persistence in SQLite/config/frontend.
 - No disabling provider safeguards by default.
+
+## Speed preferences, local change snapshots and Claude usage audit (checked 2026-10-10)
+
+Codex follow-up audit rechecked the official [app-server contract](https://learn.chatgpt.com/docs/app-server)
+and installed CLI 0.160.1 generated stable schemas on 2026-10-10. Existing account-bound
+`thread/resume` already preserves conversations; single turns append only current input.
+The follow-up consumes `thread/tokenUsage/updated` locally and retains numeric counters only.
+Thread `total` is cumulative and `last` is the latest model request, not the entire user turn.
+Usage must be calculated against a known pre-turn baseline, exclude replayed/other-thread
+events, and mark missing baselines/counter resets as incomplete. No token-to-quota conversion,
+new inference stage, credential access, polling loop or automatic account fallback is added.
+Existing ChatGPT rate-limit snapshots remain account-level information, not exact task bills.
+
+Official sources checked: [Codex speed](https://learn.chatgpt.com/docs/agent-configuration/speed),
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+[app-server](https://learn.chatgpt.com/docs/app-server), [Claude Fast](https://code.claude.com/docs/en/fast-mode),
+[headless operation](https://code.claude.com/docs/en/headless), and
+[shared Claude usage limits](https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work).
+The official installed Codex CLI 0.160.1 stable generated JSON schema exposes `Model.serviceTiers`,
+legacy `additionalSpeedTiers`, and `TurnStartParams.serviceTierForTurn` (explicit `default` for standard).
+Schema generation performs no inference and reads no credentials.
+
+Fast is an opt-in per-agent setting with a new migration; old sessions default to false. Codex
+availability comes from the bound account's actual model catalog, not a guessed model whitelist.
+The turn-only override selects `fast` or explicit `default` without editing account config or
+leaking a thread preference between chats. Claude uses documented `--settings` `fastMode` for
+fixed supported Opus IDs (5.5, 5 and 4.8), and explicitly false for standard; aliases are not
+claimed to support Fast. Claude Fast spends paid usage credits even with subscription allowance
+remaining: the UI must state this and require explicit opt-in before enabling. No paid account
+setting, credential, authentication route or automatic model/account fallback is changed.
+Quiet planning does not silently inherit paid Fast. Availability is a supported request path,
+not proof of account entitlement or actual acceleration; provider denial remains visible.
+
+Claude uses `--print` with `stream-json`, and resumes the stored, account-bound upstream ID.
+Single-chat messages do not append the whole app history on every resumed turn. Team and auto
+orchestration intentionally use additional sessions; the number of engine launches is not the
+number of internal model requests. Cache/input/output counters can be retained only when the
+official result reports them, without monetary-to-subscription conversions, fabricated quota
+percentages, raw responses, private thinking, or secrets. No measured Desktop/app multiplier
+is claimed without a controlled live comparison.
+
+Change cards must use a bounded local before/after snapshot of the current user turn, rather
+than the accumulated worktree diff. Existing uncommitted edits are baseline data. No Git index
+writes, commits, history rewrites or provider-generated claims are needed for this display.
+
+Snapshots retain file content in bounded memory only; the event log stores paths, status and
+line counts. Credential paths, reparse points, ignored files and Git internals are excluded.
+Counts for binary/oversized files may be unavailable; limits are disclosed. Changes made
+concurrently by another process in the same workspace are included in the before/after
+window, so the card does not claim exclusive attribution. Empty latest-turn snapshots clear
+the card rather than reusing old worktree changes. Historical replies are not backfilled
+from today's dirty worktree. See the [concrete Claude audit](claude-usage-audit.md).
+
+The official pinned SDK result declarations identify `usage` as per-turn main-agent-loop
+counters, excluding some sidechain/subagent requests; `modelUsage` and cost can be cumulative
+across resumed turns. Only numeric per-turn counters and observed app launches are retained.
+No polling, retry, model call, secret payload or monetary-to-plan conversion is added for
+these diagnostics. Fresh worker history, resumed coordinator history and team attachment
+descriptions were duplicated by application orchestration and have been corrected.
+
+Validation on 2026-10-10: `cargo fmt --all`, `cargo check` and `cargo check --workspace`
+(including Tauri), `cargo test` (92 passed, 5 explicitly ignored provider-environment tests),
+`cargo clippy -- -D warnings`, `npm run typecheck`, `npm test` (41 passed), `npm run build`,
+and six Playwright chat/Claude/Fast scenarios passed. The snapshot regression uses a real
+temporary Git directory and two application turns: old dirty files are excluded and a
+status-only reply has an empty persisted snapshot. Claude subprocess tests use the clearly
+labelled local CLI fixture, not subscription inference. Live acceptance/entitlement and
+actual acceleration for Fast have not been tested. No release or installed-app update was
+performed. New fields required an explicit false default in the existing Smart Computer
+example; that example was compiled by `cargo test` and its desktop actions were not run.
+
+## Smart Computer MCP design (checked 2026-10-09; implementation in progress)
+
+The requested integration uses the existing ChatGPT subscription and local Codex MCP, not the
+paid Computer Use API or an additional model. The [official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp)
+documents stdio servers; [MCP tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+support structured and image content. The [app-server reference](https://learn.chatgpt.com/docs/app-server)
+supports per-thread configuration. Experimental dynamic tools and production-forbidden plugin
+RPC methods are not used. Existing authentication, account binding, sandbox and approvals stay intact.
+
+Implementation boundaries: separate stdio proxy and Desktop Host processes, user/session-scoped
+named pipes with client identity checks, app-selected windows, one active controller, fresh approval
+for every desktop observation/action, visible indicator and emergency stop. No permission persists
+across actions, chats, agents or full-access changes. Denial, disconnection, timeout and application
+exit cancel pending work. Sensitive/credential UI and elevated/secure desktops are blocked.
+Audit records contain action kinds, timing and outcome only, never text, element names or images.
+
+Use native UI Automation, Windows.Media.Ocr and Windows.Graphics.Capture on demand; no cloud OCR,
+continuous recording, generated-code execution or local neural model. Structural observation prefers
+the optional application adapter, then UIA and OCR. Visual tasks use real images, with ROI/downscaling,
+content-change checks and bounded in-memory caching. Execution and result verification are separate.
+Unity adapter commands are allowlisted, project-local, require approvals for writes and use Undo;
+arbitrary C# evaluation is forbidden. Documentation and tests will record actual validation and
+limitations; this design section does not claim completed implementation or live Codex validation.
 
 ## Codex plugin manager and compact interface (0.8.8, checked 2026-10-09)
 
@@ -474,3 +815,15 @@ unrestricted autonomous delegation. Provider safeguards and account binding are 
 Quota UI uses existing official snapshots only, with checked-at times and explicit unknown/error states.
 Document review reads local allowlisted Office XML and text; app-owned comments are stored locally
 in a new migration, never inserted into provider configuration or Office files.
+
+## Desktop tool parity (0.8.16, checked 2026-10-15)
+
+The Claude adapter now enables the CLI's own built-in tools that Claude Desktop uses:
+native subagents (single chats only; team runs keep `Agent` denied), task lists, `ToolSearch`,
+web search/fetch and `Monitor`. Every tool call, including subagent calls, still passes the
+documented PreToolUse/PermissionRequest hook; credential paths stay blocked in every mode and
+read-only/Plan deny all external tools. Claude Code's per-project memory folder inside the bound
+account profile is readable and writable through file tools; other profile files stay protected.
+Run and approval deadlines were removed; Stop still terminates the process tree. Online
+documentation was not re-fetched in this session; tool names were verified against the installed
+Claude Code 2.1.294 without inference. Details: [0.8.16](desktop-parity-0.8.16.md).

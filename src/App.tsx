@@ -1,3 +1,5 @@
+import { ConversationControls } from './components/ConversationControls';
+import { FollowupQueue } from './components/FollowupQueue';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronRight,
@@ -27,6 +29,7 @@ import { eventStatus, historyPageSize, mergeEvents } from './timeline';
 import { usePreference } from './preferences';
 import { useAccountState } from './accounts';
 import { Timeline } from './components/Timeline';
+import { Workflows } from './components/Workflows';
 import { ContextPanel } from './components/ContextPanel';
 import { Settings } from './components/Settings';
 import { FileManager } from './components/FileManager';
@@ -45,16 +48,25 @@ import { ProjectChanges } from './components/ProjectChanges';
 import { ExtensionsDialog } from './components/ExtensionsDialog';
 import { ContextMenu } from './components/ContextMenu';
 import { Dialog } from './components/Dialog';
+import { ComputerDialog, ComputerIndicator, useComputer } from './components/Computer';
 import { modeLabels } from './chat';
 import type { DraftAttachment } from './attachments';
 import { counted, errorText, sessionTitle, statusLabels } from './locale';
 
 export function App() {
   const [client, setClient] = useState<ClientTransport | null>(null);
+  const computer = useComputer(client);
   const [data, setData] = useState<Snapshot | null>(null);
+  const latestData = useRef(data);
+  latestData.current = data;
+  const [completion, setCompletion] = useState<{ id: string; title: string; failed: boolean }>();
   const [projectId, setProjectId] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [followupMode, setFollowupMode] = useState<'queue' | 'steer'>(() =>
+    localStorage.getItem('bebekon-followup') === 'steer' ? 'steer' : 'queue',
+  );
+  const [queueRevision, setQueueRevision] = useState(0);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, DraftAttachment[]>>({});
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -70,7 +82,15 @@ export function App() {
     return () => query.removeEventListener('change', update);
   }, []);
   const [dialog, setDialog] = useState<
-    'new' | 'settings' | 'commands' | 'files' | 'changes' | 'plugins' | null
+    | 'new'
+    | 'settings'
+    | 'commands'
+    | 'files'
+    | 'changes'
+    | 'plugins'
+    | 'computer'
+    | 'workflows'
+    | null
   >(null);
   const [newChatMode, setNewChatMode] = useState<CreateChat['mode']>('single');
   const [newChatProject, setNewChatProject] = useState('');
@@ -155,6 +175,23 @@ export function App() {
       const incoming = batch;
       batch = [];
       if (!alive) return;
+      const finished = [...incoming]
+        .reverse()
+        .find(
+          (event) =>
+            ['turn_completed', 'provider_error'].includes(event.payload.type) &&
+            latestData.current?.sessions.some(
+              (s) => s.id === event.session_id && !s.parent_session_id,
+            ),
+        );
+      if (finished) {
+        const chat = latestData.current?.sessions.find((s) => s.id === finished.session_id);
+        setCompletion({
+          id: finished.session_id,
+          title: chat?.title ?? 'Задача',
+          failed: finished.payload.type === 'provider_error',
+        });
+      }
       setEvents((current) =>
         mergeEvents(
           current,
@@ -389,23 +426,50 @@ export function App() {
     setNewChatProject(project);
     setDialog('new');
   };
-  const send = () => {
+  const contextControl =
+    client && session ? (
+      <ConversationControls
+        key={session.id}
+        session={session}
+        events={events.filter((e) => e.session_id === session.id)}
+        client={client}
+        running={running || busy}
+        updated={(updated) =>
+          setData((current) =>
+            current
+              ? {
+                  ...current,
+                  sessions: current.sessions.map((s) => (s.id === updated.id ? updated : s)),
+                }
+              : current,
+          )
+        }
+      />
+    ) : null;
+  const send = (mode: 'queue' | 'steer' = followupMode) => {
     if (
       !client ||
       !session ||
       (!draft.trim() && !attachments.length) ||
       busy ||
-      running ||
       data?.sessions.some((s) => s.id === session.parent_session_id && s.status === 'running')
     )
       return;
     const prompt = draft.trim() || 'Изучи прикреплённые файлы.';
     void action(async () => {
-      await client.sendMessage(
-        session.id,
-        prompt,
-        attachments.map(({ name, mime, data }) => ({ name, mime, data })),
-      );
+      const files = attachments.map(({ name, mime, data }) => ({ name, mime, data }));
+      if (running) {
+        if (mode === 'steer' && ['openai', 'anthropic'].includes(session.provider)) {
+          const run = events
+            .filter((e) => e.session_id === session.id && e.payload.type === 'turn_started')
+            .at(-1)?.run_id;
+          if (!run) throw new Error('Активный ход ещё не загружен');
+          await client.steerMessage(session.id, run, prompt, files);
+        } else {
+          await client.enqueueMessage(session.id, prompt, files);
+          setQueueRevision((n) => n + 1);
+        }
+      } else await client.sendMessage(session.id, prompt, files);
       setDrafts((current) => ({ ...current, [session.id]: '' }));
       setAttachmentDrafts((current) => ({ ...current, [session.id]: [] }));
     });
@@ -529,6 +593,7 @@ export function App() {
         showSettings={showSettings}
         search={() => setDialog('commands')}
         openPlugins={() => setDialog('plugins')}
+        openComputer={() => setDialog('computer')}
         selectProject={selectProject}
         selectSession={selectSession}
         startSession={(id) => {
@@ -557,6 +622,31 @@ export function App() {
       />
 
       <main className="main-workspace">
+        {completion && (
+          <div role="status" className="completion-notice">
+            <span>
+              {completion.failed ? 'Задача завершилась с ошибкой' : 'Задача завершена'} ·{' '}
+              {sessionTitle(completion.title)}
+            </span>
+            <button
+              className="text-button"
+              onClick={() => {
+                const chat = data?.sessions.find((s) => s.id === completion.id);
+                if (chat) selectSession(chat);
+                setCompletion(undefined);
+              }}
+            >
+              Открыть чат
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Скрыть уведомление о задаче"
+              onClick={() => setCompletion(undefined)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         {browserPreview && (
           <div className="preview-banner">
             Предпросмотр для разработки · данные хранятся в памяти · файлы и обновления доступны в
@@ -599,6 +689,9 @@ export function App() {
                     </span>
                   </div>
                   {projectTools}
+                  <button className="text-button" onClick={() => setDialog('workflows')}>
+                    Задачи и версии
+                  </button>
                 </div>
                 {session.parent_session_id && (
                   <div className="chat-branches">
@@ -652,27 +745,33 @@ export function App() {
                   chooseAnotherAccount={() => {
                     setAgentDialog({ id: session.id, handoff: true });
                   }}
-                  changes={
-                    client &&
-                    workspace &&
-                    workspace.id !== 'chat-scratch' &&
-                    session.provider !== 'mock'
-                      ? {
-                          load: async () => {
-                            const [status, diff] = await Promise.all([
-                              client.gitStatus(workspace.id),
-                              client.gitDiff(workspace.id),
-                            ]);
-                            return { status, diff };
-                          },
-                          open: () => setDialog('changes'),
-                        }
-                      : undefined
-                  }
                   events={events.filter((event) => event.session_id === session.id)}
                   historyLoading={historyLoading}
                 />
+                {client && !session.parent_session_id && (
+                  <FollowupQueue
+                    key={`queue-${session.id}`}
+                    client={client}
+                    sessionId={session.id}
+                    revision={String(queueRevision)}
+                  />
+                )}
                 <Composer
+                  followupMode={
+                    ['openai', 'anthropic'].includes(session.provider) ? followupMode : 'queue'
+                  }
+                  canSteer={
+                    ['openai', 'anthropic'].includes(session.provider) && !session.parent_session_id
+                  }
+                  liveHint={
+                    session.provider === 'anthropic'
+                      ? 'Claude получает дополнение через работающий CLI: после текущих инструментов или следующим ходом, как решит движок.'
+                      : undefined
+                  }
+                  setFollowupMode={(mode) => {
+                    setFollowupMode(mode);
+                    localStorage.setItem('bebekon-followup', mode);
+                  }}
                   key={session.id}
                   mcpServers={mentionServers}
                   mcpActive={(data?.sessions ?? []).some(
@@ -726,11 +825,13 @@ export function App() {
                           <TeamComposerAgents
                             session={session}
                             sessions={data?.sessions ?? []}
+                            contextControl={contextControl}
                             busy={busy || running}
                             configure={(id) => setAgentDialog({ id, handoff: false })}
                           />
                         )}
                         <ChatControls
+                          contextControl={contextControl}
                           team={session.chat_mode !== 'single'}
                           client={client}
                           session={session}
@@ -857,6 +958,7 @@ export function App() {
                 rail
                 session={session}
                 sessions={data?.sessions ?? []}
+                contextControl={contextControl}
                 busy={busy || running}
                 configure={(id) => setAgentDialog({ id, handoff: false })}
               />
@@ -888,12 +990,7 @@ export function App() {
           onDiscuss={
             session
               ? (prompt) => {
-                  // Stay within the core's UTF-8 byte limit, including non-Latin text.
-                  const draft =
-                    prompt.length > 10000
-                      ? `${prompt.slice(0, 9800)}\n\n[Список сокращён до размера сообщения. Полные замечания доступны в просмотре файла.]`
-                      : prompt;
-                  setDrafts((current) => ({ ...current, [session.id]: draft }));
+                  setDrafts((current) => ({ ...current, [session.id]: prompt }));
                   setDialog(null);
                   composer.current?.focus();
                 }
@@ -944,6 +1041,7 @@ export function App() {
       )}
       {dialog === 'plugins' && client && data && (
         <ExtensionsDialog
+          openComputer={() => setDialog('computer')}
           client={client}
           data={data}
           session={session}
@@ -981,6 +1079,29 @@ export function App() {
             setDialog(null);
             setAgentDialog({ id: member.id, handoff: false, tools: true });
           }}
+        />
+      )}
+      {client && (
+        <ComputerIndicator client={client} status={computer} open={() => setDialog('computer')} />
+      )}
+      {dialog === 'workflows' && client && session && (
+        <Workflows
+          client={client}
+          session={session}
+          close={() => setDialog(null)}
+          branched={async (s) => {
+            setData(await client.snapshot());
+            selectSession(s);
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog === 'computer' && client && (
+        <ComputerDialog
+          client={client}
+          session={session}
+          status={computer}
+          close={() => setDialog(null)}
         />
       )}
       {dialog === 'new' && data && client && (

@@ -6,7 +6,7 @@ test('project tree and separate chat modes stay discoverable without duplicated 
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto('/?preview=1');
   const sidebar = page.getByRole('complementary', { name: 'Проекты и чаты' });
-  for (const name of ['Проекты', 'Обычные чаты', 'Команды агентов', 'Авторазбиение']) {
+  for (const name of ['Проекты', 'Обычные чаты', 'Команды агентов', 'Автокоманда']) {
     await expect(sidebar.getByRole('region', { name, exact: true })).toBeVisible();
   }
   await sidebar.getByRole('button', { name: 'Добавить проект', exact: true }).click();
@@ -21,8 +21,8 @@ test('project tree and separate chat modes stay discoverable without duplicated 
   await expect(
     sidebar.getByRole('region', { name: 'Обычные чаты', exact: true }).locator('.recent-chat'),
   ).toHaveCount(0);
-  const user = await page.locator('.step-message:not(.agent)').boundingBox();
-  const answer = await page.locator('.step-message.agent').boundingBox();
+  const user = await page.locator('.user-message').first().boundingBox();
+  const answer = await page.locator('.step-message.agent').last().boundingBox();
   expect(user!.x).toBeGreaterThan(answer!.x + 80);
   expect(user!.x + user!.width).toBeCloseTo(answer!.x + answer!.width, 0);
   expect(answer!.width).toBeGreaterThan(700);
@@ -63,7 +63,10 @@ test('team has one shared answer and settings open without taking space from the
   await expect(page.locator('.team-member')).toHaveCount(2);
   const after = await page.locator('.chat-timeline').boundingBox();
   expect(after!.height).toBe(before!.height);
-  await page.getByRole('button', { name: 'Настроить Рецензент', exact: true }).click();
+  await page
+    .locator('.team-panel')
+    .getByRole('button', { name: /^Настроить Рецензент/ })
+    .click();
   await expect(
     page.getByRole('dialog', { name: 'Настройки агента' }).getByLabel('Доступ', { exact: true }),
   ).toBeEnabled();
@@ -75,7 +78,7 @@ test('team has one shared answer and settings open without taking space from the
   await expect(page.getByText(/^Ответ завершён/)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.step-message.agent')).toHaveCount(1);
   await expect(page.locator('.step-message.agent .entry-label')).toHaveText('Ответ команды');
-  await expect(page.locator('.chat-activity-details')).not.toHaveAttribute('open');
+  await expect(page.locator('.tool-list')).toHaveCount(0);
   await expect(page.locator('.context-panel')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/workspace-team-result.png' });
   await page.getByRole('button', { name: 'Плагины', exact: true }).click();
@@ -83,17 +86,18 @@ test('team has one shared answer and settings open without taking space from the
   await plugins.getByRole('button', { name: 'Подключённые', exact: true }).click();
   await expect(plugins.getByText('Пример плагина', { exact: true })).toBeVisible();
   await expect(
-    plugins.getByRole('button', { name: 'Рецензент · выбрать инструменты' }),
+    plugins.getByRole('button', { name: /^Рецензент.*выбрать инструменты/ }),
   ).toBeVisible();
-  await plugins.getByRole('button', { name: 'Рецензент · выбрать инструменты' }).click();
+  await plugins.getByRole('button', { name: /^Рецензент.*выбрать инструменты/ }).click();
   const agentSettings = page.getByRole('dialog', { name: 'Настройки агента' });
   await expect(
     agentSettings.getByRole('button', { name: 'Плагины, MCP и навыки' }),
   ).toHaveAttribute('aria-expanded', 'true');
-  await expect(agentSettings.getByRole('checkbox', { name: /Пример плагина/ })).toBeChecked();
+  await expect(agentSettings.getByRole('checkbox', { name: /Пример плагина/ })).not.toBeChecked();
+  await expect(agentSettings.getByRole('checkbox', { name: /Пример плагина/ })).toBeDisabled();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Создать чат с авторазбиением' }).click();
-  await expect(page.getByRole('button', { name: /Авторазбиение/ }).last()).toHaveAttribute(
+  await page.getByRole('button', { name: 'Создать чат с автоматическими ролями' }).click();
+  await expect(page.getByRole('button', { name: /Автокоманда/ }).last()).toHaveAttribute(
     'aria-pressed',
     'true',
   );

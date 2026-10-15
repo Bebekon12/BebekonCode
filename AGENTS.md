@@ -7,11 +7,18 @@ reverse engineer authentication, impersonate providers, or use undocumented cons
 Never copy credentials from official clients. Never log secrets or put them in SQLite, frontend,
 configuration, Git, or crash metadata. Keep provider sandboxes and approvals enabled by default.
 Exception approved by the owner: the user may explicitly switch an individual chat to full access
-where the provider documents it (Codex `dangerFullAccess` with `approvalPolicy=never`). It is never
+where the provider documents it (Codex `dangerFullAccess` with `approvalPolicy=never`, or Claude
+`bypassPermissions`, explicitly approved by the owner on 2026-10-14). It is never
 a default, is confirmed with a visible warning, never applies to read-only review/auto workers or
 to providers without such a documented mode, and credentials stay off-limits.
-Local computer-use tools (screen, mouse, keyboard) require per-action user confirmation and a
-visible control indicator in every access mode, including full access.
+Owner update on 2026-10-15: explicitly selected workspace_auto and full_access must not show
+per-tool approval prompts. Use documented non-interactive provider modes and pre-authorize
+the selected tools/MCP servers; reject disallowed actions without waiting for the user.
+Codex workspace_auto retains its workspace sandbox. Claude shell/MCP on native Windows
+have no OS sandbox; do not claim otherwise. Default/manual and read-only modes remain guarded.
+Selected external MCP servers no longer require per-call consent in these automatic modes.
+The built-in local computer-use bridge (screen, mouse, keyboard) retains its separate
+per-action user confirmation and visible control indicator.
 No remote listener, telemetry, automatic merges, destructive Git actions, or other permission
 bypasses.
 Only official documented provider integrations. Unsupported features must be visible as unavailable.

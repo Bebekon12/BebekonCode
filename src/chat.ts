@@ -3,7 +3,7 @@ import type { AgentConfig, Session, Snapshot } from './contracts';
 export const modeLabels = {
   single: 'Обычный чат',
   team: 'Команда агентов',
-  auto: 'Авторазбиение',
+  auto: 'Автокоманда',
   task: 'Подзадача',
 };
 export const effortLabels: Record<string, string> = {
@@ -22,6 +22,7 @@ export function sessionConfig(session: Session): AgentConfig {
     account_profile_id: session.account_profile_id,
     model: session.model,
     reasoning_effort: session.reasoning_effort,
+    fast_mode: session.fast_mode ?? false,
     permission_profile: session.permission_profile,
     tools: JSON.parse(session.tool_policy || '{}'),
     role: session.role,
@@ -40,6 +41,7 @@ export function defaultAgent(data: Snapshot): AgentConfig {
     account_profile_id: account?.id ?? '',
     model: '',
     reasoning_effort: null,
+    fast_mode: false,
     permission_profile: 'standard',
     tools: {},
     role: '',
@@ -47,10 +49,10 @@ export function defaultAgent(data: Snapshot): AgentConfig {
 }
 
 export const teamRoles = {
-  coordinator: 'Координатор: проверки, команды и итог',
-  implementer: 'Исполнитель: анализ кода, правки и интерфейс',
-  commands: 'Исполнитель: команды, тесты и правки',
-  reviewer: 'Рецензент',
+  coordinator: 'Ведущий: реализация, интеграция и проверки',
+  implementer: 'Архитектор: механика, UX и визуальная концепция',
+  commands: 'Архитектор: код, контракты и интеграция',
+  reviewer: 'Рецензент: риски и критерии приёмки',
 };
 
 function readyAccount(data: Snapshot, provider: string) {
@@ -74,13 +76,14 @@ export function teamPartner(data: Snapshot, first: AgentConfig): AgentConfig {
     provider: partner,
     account_profile_id: account.id,
     role: partner === 'anthropic' ? teamRoles.implementer : teamRoles.commands,
+    permission_profile: 'read_only',
+    reasoning_effort: 'low',
   };
 }
 
 /**
- * Default team, split by the tools each provider actually has here: Codex runs commands and
- * tests, so it coordinates and verifies the final state; Claude (no Windows shell) reads and
- * edits code. The first agent is the coordinator. Access stays at the default; the user decides.
+ * Product roles, not a claim about model superiority: one lead implements, one adviser
+ * supplies architecture/UX contracts. Users can choose either provider as the lead.
  */
 export function defaultTeam(data: Snapshot): AgentConfig[] {
   const codex = readyAccount(data, 'openai');
@@ -99,6 +102,8 @@ export function defaultTeam(data: Snapshot): AgentConfig[] {
         provider: 'anthropic',
         account_profile_id: claude.id,
         role: teamRoles.implementer,
+        permission_profile: 'read_only',
+        reasoning_effort: 'low',
       },
     ];
   return [base, { ...base, role: teamRoles.reviewer, permission_profile: 'read_only' }];

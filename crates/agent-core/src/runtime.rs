@@ -17,6 +17,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub struct Core {
+    pub(crate) live_inputs: crate::conversation::LiveRegistry,
+    pub(crate) workflow_stop: CancellationToken,
+    pub(crate) queue_wake: Arc<tokio::sync::Notify>,
+    pub(crate) queue_ops: tokio::sync::Mutex<()>,
+    pub(crate) queue_tokens: Mutex<HashMap<String, CancellationToken>>,
+    pub(crate) project_locks: Arc<Mutex<HashMap<PathBuf, String>>>,
+    pub computer: Arc<smart_computer::manager::Manager>,
     pub storage: Storage,
     pub(crate) data_dir: PathBuf,
     pub(crate) engines: HashMap<String, Arc<dyn AgentProvider>>,
@@ -25,28 +32,40 @@ pub struct Core {
     pub(crate) runs: Arc<Mutex<HashMap<String, CancellationToken>>>,
     providers: Mutex<Vec<ProviderInfo>>,
 }
+impl Drop for Core {
+    fn drop(&mut self) {
+        self.workflow_stop.cancel();
+    }
+}
 
 impl Core {
     pub async fn open(database: &Path) -> Result<Arc<Self>> {
         let (account_events, _) = broadcast::channel(64);
+        let computer = Arc::new(smart_computer::manager::Manager::new(
+            std::env::current_exe()?,
+        ));
         let providers: Vec<Arc<dyn AgentProvider>> = vec![
             Arc::new(MockProvider),
-            Arc::new(CodexProvider::new(account_events.clone())),
+            Arc::new(CodexProvider::new(account_events.clone()).with_computer(computer.clone())),
             Arc::new(ClaudeProvider::new(account_events.clone())),
         ];
-        Self::open_with(database, providers, account_events).await
+        Self::open_with(database, providers, account_events, computer).await
     }
     pub async fn open_with_providers(
         database: &Path,
         providers: Vec<Arc<dyn AgentProvider>>,
     ) -> Result<Arc<Self>> {
         let (account_events, _) = broadcast::channel(64);
-        Self::open_with(database, providers, account_events).await
+        let computer = Arc::new(smart_computer::manager::Manager::new(
+            std::env::current_exe()?,
+        ));
+        Self::open_with(database, providers, account_events, computer).await
     }
     async fn open_with(
         database: &Path,
         providers: Vec<Arc<dyn AgentProvider>>,
         account_events: broadcast::Sender<AccountEvent>,
+        computer: Arc<smart_computer::manager::Manager>,
     ) -> Result<Arc<Self>> {
         let storage = Storage::open(database).await?;
         let data_dir = database
@@ -63,6 +82,13 @@ impl Core {
         }
         let (events, _) = broadcast::channel(512);
         let core = Arc::new(Self {
+            live_inputs: Arc::default(),
+            workflow_stop: CancellationToken::new(),
+            queue_wake: Arc::new(tokio::sync::Notify::new()),
+            queue_ops: tokio::sync::Mutex::new(()),
+            queue_tokens: Mutex::default(),
+            project_locks: Arc::default(),
+            computer,
             storage,
             data_dir,
             engines,
@@ -73,6 +99,7 @@ impl Core {
         });
         core.publish_providers()?;
         core.track_sign_in();
+        core.start_queue_worker();
         Ok(core)
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -206,13 +233,35 @@ impl Core {
         prompt: String,
         attachments: Vec<crate::attachments::Attachment>,
     ) -> Result<String> {
-        if prompt.trim().is_empty() || prompt.len() > 32_000 {
-            return Err(CoreError::Invalid(
-                "Сообщение должно содержать от 1 до 32 000 байт".into(),
-            ));
+        self.send_message_checked(session_id, prompt, attachments, None, None, None)
+            .await
+    }
+    pub(crate) async fn send_message_checked(
+        self: &Arc<Self>,
+        session_id: &str,
+        prompt: String,
+        attachments: Vec<crate::attachments::Attachment>,
+        expected_config: Option<&str>,
+        supplied_cancel: Option<CancellationToken>,
+        prepared_files: Option<Vec<crate::attachments::AttachedFile>>,
+    ) -> Result<String> {
+        if prompt.trim().is_empty() {
+            return Err(CoreError::Invalid("Сообщение не должно быть пустым".into()));
         }
         let session = self.storage.session(session_id).await?;
-        let cancel = CancellationToken::new();
+        if prompt == "/compact"
+            && (!attachments.is_empty()
+                || prepared_files.as_ref().is_some_and(|f| !f.is_empty())
+                || session.provider_session_id.is_none()
+                || session.parent_session_id.is_some()
+                || !["openai", "anthropic"].contains(&session.provider.as_str()))
+        {
+            return Err(CoreError::Invalid(
+                "Сжатие доступно существующему основному диалогу Claude/Codex без вложений".into(),
+            ));
+        }
+        let project_lease = self.project_lease(&session)?;
+        let cancel = supplied_cancel.unwrap_or_default();
         {
             let mut runs = self.runs.lock().map_err(|_| CoreError::Busy)?;
             if runs.contains_key(session_id) {
@@ -230,11 +279,20 @@ impl Core {
         // Read again after reserving: a concurrent, explicit settings change may have finished.
         let prepared = async {
             let session = self.storage.session(session_id).await?;
+            if expected_config.is_some()
+                && expected_config != Some(self.queue_configuration(&session).await?.as_str())
+            {
+                return Err(CoreError::Invalid(
+                    "Настройки задачи изменились; повторно подтвердите очередь".into(),
+                ));
+            }
+            crate::conversation::ConversationSettings::read(&session)?;
             let provider = Arc::clone(self.engine(&session.provider)?);
             let account = self.account(&session.account_profile_id).await?;
             let attachment_session = session.clone();
-            let attachments = tokio::task::spawn_blocking(move || {
-                crate::attachments::prepare(&attachment_session, attachments)
+            let attachments = tokio::task::spawn_blocking(move || match prepared_files {
+                Some(files) => Ok(files),
+                None => crate::attachments::prepare(&attachment_session, attachments),
             })
             .await
             .map_err(|_| CoreError::Invalid("Не удалось подготовить вложения".into()))??;
@@ -288,6 +346,28 @@ impl Core {
         let core = Arc::clone(self);
         let result = run.clone();
         tokio::spawn(async move {
+            let _project_lease = project_lease;
+            if prompt != "/compact"
+                && session.provider != "mock"
+                && session.parent_session_id.is_none()
+                && (matches!(session.chat_mode.as_str(), "team" | "auto")
+                    || !matches!(session.permission_profile.as_str(), "read_only" | "plan"))
+            {
+                if let Err(error) = core.capture_checkpoint(&session, "Перед сообщением").await
+                {
+                    let _ = core
+                        .emit(
+                            &session.id,
+                            &run,
+                            EventPayload::ToolActivity {
+                                label: "Контрольная точка недоступна".into(),
+                                detail: crate::redaction::redact(&error.to_string()),
+                            },
+                            None,
+                        )
+                        .await;
+                }
+            }
             if !attachments.is_empty() {
                 if let Err(error) = core
                     .emit(
@@ -308,7 +388,10 @@ impl Core {
                     return;
                 }
             }
-            if session.chat_mode == "single" || session.parent_session_id.is_some() {
+            if prompt == "/compact"
+                || session.chat_mode == "single"
+                || session.parent_session_id.is_some()
+            {
                 let _ = core
                     .run_turn(
                         provider,
@@ -317,6 +400,7 @@ impl Core {
                             account,
                             prompt,
                             attachments,
+                            live_input: None,
                             output_schema: None,
                         },
                         run,
@@ -340,6 +424,12 @@ impl Core {
         let (tx, mut rx) = mpsc::channel(64);
         let session = &request.session;
         let session_id = session.id.clone();
+        let change_root = session.working_directory.clone();
+        let baseline = if session.parent_session_id.is_none() && session.provider != "mock" {
+            crate::changes::snapshot(Path::new(&change_root)).await
+        } else {
+            None
+        };
         let relay: Option<(String, String, String)> = if session.chat_mode == "task" {
             if let Some(parent) = &session.parent_session_id {
                 let parent_run: Option<String> = sqlx::query_scalar("SELECT run_id FROM events WHERE session_id=? AND json_extract(payload,'$.type')='turn_started' ORDER BY sequence DESC LIMIT 1")
@@ -365,6 +455,7 @@ impl Core {
             model: request.session.model.clone(),
             account_profile_id: request.account.id.clone(),
             reasoning_effort: request.session.reasoning_effort.clone(),
+            fast_mode: request.session.fast_mode,
         };
         match self.storage.append(&session, &run, metadata, None).await {
             Ok(event) => {
@@ -381,6 +472,38 @@ impl Core {
         }
         let child_cancel = cancel.clone();
         let request_effort = request.session.reasoning_effort.clone();
+        let launch = EventPayload::ProviderRunStarted {
+            provider: request.session.provider.clone(),
+            model: request.session.model.clone(),
+            purpose: if request.session.chat_mode == "task" {
+                "specialist"
+            } else {
+                "execution"
+            }
+            .into(),
+            resumed: request.session.provider_session_id.is_some(),
+            prompt_bytes: request.prompt.len() as u64,
+        };
+        if self
+            .emit(&session, &run, launch.clone(), None)
+            .await
+            .is_err()
+        {
+            tracing::warn!(code = "provider_launch_diagnostic_failed");
+        }
+        if let Some((parent, parent_run, _)) = &relay {
+            if self.emit(parent, parent_run, launch, None).await.is_err() {
+                tracing::warn!(code = "provider_launch_relay_failed");
+            }
+        }
+        let settings = crate::conversation::ConversationSettings::read(&request.session)?;
+        if request.prompt != "/compact"
+            && !settings.guidance().is_empty()
+            && request.session.parent_session_id.is_none()
+        {
+            request.prompt = format!("{}\n\n{}", settings.guidance(), request.prompt);
+        }
+        let _live = self.live_input(&mut request, &run);
         let producer = tokio::spawn(async move { provider.run(request, tx, child_cancel).await });
         let mut failed = false;
         let mut reported_failure = None;
@@ -395,11 +518,25 @@ impl Core {
                     .is_err()
                 {
                     tracing::warn!(code = "provider_session_write_failed");
+                    failed = true;
+                    reported_failure = Some((
+                        "Не удалось сохранить ID сессии провайдера. Запуск остановлен; автоматический повтор не выполняется.".into(),
+                        Some("session_persistence".into()),
+                    ));
+                    cancel.cancel();
+                    break;
                 }
                 continue;
             }
             // Approval outcomes are still recorded while a cancelled turn winds down.
-            if cancel.is_cancelled() && !matches!(payload, EventPayload::ApprovalResolved { .. }) {
+            if cancel.is_cancelled()
+                && !matches!(
+                    payload,
+                    EventPayload::ApprovalResolved { .. }
+                        | EventPayload::ProviderUsage { .. }
+                        | EventPayload::ProviderDiagnostic { .. }
+                )
+            {
                 continue;
             }
             if let EventPayload::AssistantTextDelta { text } = &payload {
@@ -415,6 +552,8 @@ impl Core {
             }
             if let Some((parent, parent_run, title)) = &relay {
                 let forwarded = match &payload {
+                    EventPayload::ProviderUsage { .. }
+                    | EventPayload::ProviderDiagnostic { .. } => Some(payload.clone()),
                     EventPayload::AssistantTextDelta { text }
                     | EventPayload::ProgressDelta { text } => Some(EventPayload::TeamMessage {
                         session_id: session.clone(),
@@ -436,6 +575,12 @@ impl Core {
                         Some(EventPayload::ToolActivity {
                             label: format!("{title} · {label}"),
                             detail: detail.clone(),
+                        })
+                    }
+                    EventPayload::ToolStarted { tool, summary, .. } => {
+                        Some(EventPayload::ToolActivity {
+                            label: format!("{title} · {tool}"),
+                            detail: summary.clone(),
                         })
                     }
                     EventPayload::ApprovalRequested {
@@ -494,6 +639,13 @@ impl Core {
             Err(_) => Some(("Обработчик провайдера аварийно завершился".into(), None)),
         };
         let provider_failure = provider_failure.or(reported_failure);
+        if self
+            .record_changes(&session, &run, &change_root, baseline)
+            .await
+            .is_err()
+        {
+            tracing::warn!(code = "turn_change_snapshot_failed");
+        }
         let (payload, status) = if let Some((message, kind)) = provider_failure {
             (EventPayload::ProviderError { message, kind }, "failed")
         } else if failed {
@@ -820,6 +972,7 @@ impl Core {
     }
 
     pub fn cancel(&self, session: &str) -> Result<()> {
+        self.computer.revoke_session(session);
         if let Some(token) = self.runs.lock().map_err(|_| CoreError::Busy)?.get(session) {
             token.cancel();
         }
@@ -834,6 +987,8 @@ impl Core {
     }
     /// Cancels turns and stops provider processes. The OS job object is the backstop.
     pub async fn shutdown(&self) {
+        self.workflow_stop.cancel();
+        self.computer.shutdown_async().await;
         self.cancel_all();
         for engine in self.engines.values() {
             engine.shutdown().await;

@@ -54,12 +54,12 @@ test('document and table comments survive reopening and can be resolved or discu
   await expect(files.locator('.review-comment')).toHaveCount(3);
   await files.getByRole('button', { name: 'Обсудить в чате', exact: true }).click();
   await expect(page.getByLabel('Сообщение агенту')).toHaveValue(/Проверь статус дизайна/);
-  await expect(page.getByLabel('Сообщение агенту')).toHaveValue(/Список сокращён/);
+  await expect(page.getByLabel('Сообщение агенту')).not.toHaveValue(/Список сокращён/);
   expect(
     await page
       .getByLabel('Сообщение агенту')
-      .evaluate((e: HTMLTextAreaElement) => new TextEncoder().encode(e.value).length),
-  ).toBeLessThan(32000);
+      .evaluate((e: HTMLTextAreaElement) => [...e.value].filter((char) => char === 'Ж').length),
+  ).toBe(12000);
 });
 
 test('Office parser reads real XML parts, cached formulas and rejects external entities', async ({

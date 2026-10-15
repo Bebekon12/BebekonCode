@@ -1,10 +1,10 @@
 [workspace]
-members = ["crates/agent-core", "src-tauri"]
+members = ["crates/agent-core", "crates/smart-computer", "src-tauri"]
 default-members = ["crates/agent-core"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.8"
+version = "0.8.16"
 edition = "2021"
 rust-version = "1.90"
 license = "MIT"

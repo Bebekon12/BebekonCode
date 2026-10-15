@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
  * ```bebekon-chart {"title":"…","max":10,"items":[{"label":"Свет","value":4}]} ```.
  * Data is validated strictly; anything unexpected falls back to the plain code block.
  */
-export const richBlockKinds = ['chart', 'metrics', 'palette', 'priorities'] as const;
+export const richBlockKinds = ['chart', 'line', 'metrics', 'palette', 'priorities'] as const;
 
 type Item = Record<string, unknown>;
 const text = (value: unknown, limit = 200) =>
@@ -18,6 +18,7 @@ const items = (data: Item, limit: number) =>
     : [];
 
 export function richBlock(kind: string, source: string): ReactNode | null {
+  if (source.length > 50000) return null;
   let data: Item;
   try {
     const parsed: unknown = JSON.parse(source);
@@ -29,15 +30,17 @@ export function richBlock(kind: string, source: string): ReactNode | null {
   const title = text(data.title, 120);
   const note = text(data.note, 400);
   const body =
-    kind === 'chart'
-      ? chart(data)
-      : kind === 'metrics'
-        ? metrics(data)
-        : kind === 'palette'
-          ? palette(data)
-          : kind === 'priorities'
-            ? priorities(data)
-            : null;
+    kind === 'line'
+      ? lineChart(data)
+      : kind === 'chart'
+        ? chart(data)
+        : kind === 'metrics'
+          ? metrics(data)
+          : kind === 'palette'
+            ? palette(data)
+            : kind === 'priorities'
+              ? priorities(data)
+              : null;
   if (!body) return null;
   return (
     <figure className={`rich-block rich-${kind}`}>
@@ -163,5 +166,79 @@ function priorities(data: Item) {
         </li>
       ))}
     </ol>
+  );
+}
+
+function lineChart(data: Item) {
+  const points = items(data, 128).map((item) => ({
+    label: text(item.label, 60),
+    value: number(item.value),
+  }));
+  if (points.length < 2 || points.some((p) => !p.label || p.value === undefined)) return null;
+  const values = points.map((p) => p.value!);
+  const min = Math.min(0, ...values),
+    max = Math.max(...values, min + 1),
+    span = max - min;
+  const coords = points
+    .map(
+      (p, i) => `${30 + (i * 540) / (points.length - 1)},${190 - ((p.value! - min) * 160) / span}`,
+    )
+    .join(' ');
+  return (
+    <div className="rich-line-chart">
+      <svg viewBox="0 0 600 220" role="img" aria-label={text(data.title) || 'Линейный график'}>
+        <line x1="30" x2="570" y1="190" y2="190" stroke="currentColor" opacity=".2" />
+        <text x="3" y="30" fontSize="12" fill="currentColor">
+          {max}
+        </text>
+        <text x="3" y="190" fontSize="12" fill="currentColor">
+          {min}
+        </text>
+        {points.map(
+          (p, i) =>
+            (i === 0 ||
+              i === points.length - 1 ||
+              i % Math.max(1, Math.ceil(points.length / 6)) === 0) && (
+              <text
+                key={`label-${i}`}
+                x={30 + (i * 540) / (points.length - 1)}
+                y="211"
+                textAnchor="middle"
+                fontSize="11"
+                fill="currentColor"
+              >
+                {p.label!.slice(0, 16)}
+              </text>
+            ),
+        )}
+        <polyline points={coords} fill="none" stroke="var(--info)" strokeWidth="3" />
+        {points.map((p, i) => (
+          <circle
+            key={i}
+            cx={30 + (i * 540) / (points.length - 1)}
+            cy={190 - ((p.value! - min) * 160) / span}
+            r="4"
+            fill="var(--info)"
+          >
+            <title>
+              {p.label}: {p.value}
+            </title>
+          </circle>
+        ))}
+      </svg>
+      <details>
+        <summary>Данные графика</summary>
+        <table>
+          <tbody>
+            {points.map((p, i) => (
+              <tr key={i}>
+                <th>{p.label}</th>
+                <td>{p.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    </div>
   );
 }

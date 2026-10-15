@@ -45,6 +45,19 @@ export function NewSession({
   const changeMode = (next: CreateChat['mode']) => {
     setExpanded(0);
     setMode(next);
+    if (next === 'auto')
+      setAgents((current) =>
+        current.map((a, i) =>
+          i
+            ? {
+                ...a,
+                permission_profile:
+                  a.permission_profile === 'full_access' ? 'read_only' : a.permission_profile,
+                fast_mode: false,
+              }
+            : a,
+        ),
+      );
     if (next === 'single') setAgents((current) => current.slice(0, 1));
     // Keep the agent the user already configured; add a partner from the other provider.
     else if (next === 'team' && agents.length === 1)
@@ -64,9 +77,9 @@ export function NewSession({
         <div className="chat-mode-grid" role="group" aria-label="Режим чата">
           {(
             [
-              ['single', MessageSquare, 'Один агент. Модель и доступ можно менять в чате.'],
-              ['team', Network, 'Участники выполняют задачу. Вы получаете один общий итог.'],
-              ['auto', Layers, 'ИИ разделяет задачу на подзадачи и собирает общий результат.'],
+              ['single', MessageSquare, 'Один агент'],
+              ['team', Network, 'Несколько агентов, один итог'],
+              ['auto', Layers, 'Роли назначаются автоматически'],
             ] as const
           ).map(([id, Icon, description]) => (
             <button
@@ -82,6 +95,11 @@ export function NewSession({
             </button>
           ))}
         </div>
+        <p className="small muted" aria-label="Число запусков на сообщение">
+          {mode === 'single'
+            ? 'Один запуск на сообщение'
+            : `До ${agents.length} запусков на сообщение`}
+        </p>
         <label className="field">
           Проект · необязательно
           <select aria-label="Проект" value={project} onChange={(e) => setProject(e.target.value)}>
@@ -134,7 +152,8 @@ export function NewSession({
                   client={client}
                   data={data}
                   value={agent}
-                  worker={index > 0}
+                  participant={index > 0}
+                  worker={index > 0 && mode === 'auto'}
                   change={(value) =>
                     setAgents((current) => current.map((a, i) => (i === index ? value : a)))
                   }
@@ -145,9 +164,7 @@ export function NewSession({
         </div>
         {mode !== 'single' && (
           <p className="small muted">
-            {mode === 'auto'
-              ? 'Подзадачи анализируют проект только на чтение, до двух параллельно; основной агент проверяет результаты и вносит изменения. Каждый запрос создаёт до четырёх контекстов.'
-              : 'Участники работают с выбранным доступом: с правом записи — по очереди, только на чтение — до двух параллельно. При двух и более участниках проходит раунд взаимной проверки на чтение; при одном его результат проверяет основной агент.'}
+            Ведущий объединяет работу участников. По умолчанию участники только читают.
           </p>
         )}
         {mode !== 'single' && agents.length < 3 && (

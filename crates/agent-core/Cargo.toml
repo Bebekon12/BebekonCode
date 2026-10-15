@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+smart-computer = { path = "../smart-computer" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -39,3 +40,6 @@ windows-sys = { version = "0.61", features = [
   "Win32_Storage_FileSystem",
   "Win32_System_JobObjects",
 ] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_Graphics_Gdi"] }

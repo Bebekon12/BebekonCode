@@ -84,15 +84,25 @@ const computerUse: ProviderPlugin = {
     'Официальный плагин требует desktop-интеграции OpenAI. В BebekonCode она пока недоступна.',
   auth_policy: null,
 };
+const smartComputer: ProviderPlugin = {
+  ...computerUse,
+  id: 'builtin:smart-computer',
+  name: 'Smart Computer',
+  marketplace: 'BebekonCode',
+  description: 'Локальный MCP · окна, UIA, OCR и изображения · подписка ChatGPT',
+  unavailable_reason: null,
+};
 
 export function PluginManager({
   client,
   accountId,
   running,
+  openComputer,
 }: {
   client: ClientTransport;
   accountId: string;
   running: boolean;
+  openComputer: () => void;
 }) {
   const [inventory, setInventory] = useState<PluginInventory>();
   const [search, setSearch] = useState('');
@@ -146,6 +156,7 @@ export function PluginManager({
   const entries = inventory?.entries ?? [];
   const visible = [
     ...entries,
+    smartComputer,
     ...(!entries.some((e) => /computer[-_ ]use/i.test(e.name)) ? [computerUse] : []),
   ]
     .filter(
@@ -259,10 +270,18 @@ export function PluginManager({
                   ) : (
                     <button
                       className="icon-button"
-                      aria-label={`Установить ${entry.name}`}
+                      aria-label={
+                        entry.id === smartComputer.id
+                          ? 'Настроить Smart Computer'
+                          : `Установить ${entry.name}`
+                      }
                       title={entry.unavailable_reason ?? 'Установить'}
-                      disabled={locked || !!entry.unavailable_reason}
-                      onClick={() => setSelected(entry)}
+                      disabled={
+                        entry.id !== smartComputer.id && (locked || !!entry.unavailable_reason)
+                      }
+                      onClick={() =>
+                        entry.id === smartComputer.id ? openComputer() : setSelected(entry)
+                      }
                     >
                       <Plus size={19} />
                     </button>
@@ -311,7 +330,11 @@ export function PluginManager({
                   descriptions[selected.name] ||
                   'Навыки и инструменты выбранного каталога.'}
               </p>
-              {selected.unavailable_reason ? (
+              {selected.id === smartComputer.id ? (
+                <button className="primary-button" onClick={openComputer}>
+                  Выбрать окна
+                </button>
+              ) : selected.unavailable_reason ? (
                 <p className="plugin-unavailable">{selected.unavailable_reason}</p>
               ) : (
                 <>

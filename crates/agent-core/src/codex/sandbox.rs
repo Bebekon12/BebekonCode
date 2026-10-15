@@ -185,6 +185,7 @@ mod tests {
             closed.cancelled().await;
         });
         Arc::new(AppServer {
+            usage_totals: Mutex::default(),
             peer,
             operation: tokio::sync::Mutex::new(()),
             sandbox: Mutex::default(),
@@ -304,30 +305,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_only_review_cannot_escalate_through_an_approval_card() {
-        let server = fake_server(vec![]);
-        let (account_events, _) = broadcast::channel(16);
-        let provider = CodexProvider::new(account_events);
-        let (events, mut rx) = mpsc::channel(16);
-        provider
-            .handle_request(
-                &server,
-                &TurnState::new("thread"),
-                "reviewer",
-                true,
-                &events,
-                ServerRequest {
-                    id: json!(10),
-                    method: "item/fileChange/requestApproval".into(),
-                    params: json!({"grantRoot":"C:/outside"}),
-                },
-            )
-            .await;
-        assert!(provider.approvals.lock().unwrap().is_empty());
-        assert!(
-            matches!(rx.recv().await, Some(EventPayload::ToolActivity { label, .. }) if label == "Дополнительный доступ отклонён")
-        );
-        server.stop();
+    async fn guarded_and_noninteractive_sessions_do_not_wait_for_approval() {
+        for profile in ["read_only", "workspace_auto", "full_access"] {
+            for method in [
+                "item/fileChange/requestApproval",
+                "item/commandExecution/requestApproval",
+            ] {
+                let server = fake_server(vec![]);
+                let (account_events, _) = broadcast::channel(16);
+                let provider = CodexProvider::new(account_events);
+                let (events, mut rx) = mpsc::channel(16);
+                provider
+                    .handle_request(
+                        &server,
+                        &TurnState::new("thread"),
+                        "participant",
+                        profile,
+                        &events,
+                        ServerRequest {
+                            id: json!(10),
+                            method: method.into(),
+                            params: json!({"grantRoot":"C:/outside"}),
+                        },
+                    )
+                    .await;
+                assert!(provider.approvals.lock().unwrap().is_empty());
+                assert!(
+                    matches!(rx.recv().await, Some(EventPayload::ToolActivity { label, .. }) if label == "Дополнительный доступ отклонён")
+                );
+                assert!(rx.try_recv().is_err());
+                server.stop();
+            }
+        }
+        assert_eq!(approval_policy("standard"), "on-request");
+        assert_eq!(approval_policy("workspace_auto"), "never");
+        assert_eq!(approval_policy("full_access"), "never");
     }
     #[test]
     fn readiness_requires_explicit_confirmation() {

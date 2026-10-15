@@ -11,6 +11,244 @@ struct AppState {
     files: tokio::sync::Mutex<()>,
 }
 type IpcResult<T> = Result<T, String>;
+#[tauri::command]
+fn open_answer_link(url: String, app: tauri::AppHandle) -> IpcResult<()> {
+    let parsed = agent_core::conversation::public_link(&url).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_url(parsed, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn task_queue(
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::workflows::QueuedTask>> {
+    state.core.task_queue().await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn configure_conversation(
+    session_id: String,
+    settings: agent_core::conversation::ConversationSettings,
+    state: State<'_, AppState>,
+) -> IpcResult<Session> {
+    state
+        .core
+        .configure_conversation(&session_id, settings)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn steer_message(
+    session_id: String,
+    expected_run: String,
+    prompt: String,
+    attachments: Vec<agent_core::attachments::Attachment>,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .steer_message(&session_id, &expected_run, prompt, attachments)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn enqueue_message(
+    session_id: String,
+    prompt: String,
+    attachments: Vec<agent_core::attachments::Attachment>,
+    state: State<'_, AppState>,
+) -> IpcResult<String> {
+    state
+        .core
+        .enqueue_message(&session_id, prompt, attachments)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn edit_queued_task(
+    id: String,
+    prompt: String,
+    direction: i32,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .edit_queued_task(&id, prompt, direction)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn enqueue_task(
+    session_id: String,
+    prompt: String,
+    state: State<'_, AppState>,
+) -> IpcResult<String> {
+    state
+        .core
+        .enqueue_task(&session_id, prompt)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn change_queued_task(id: String, resume: bool, state: State<'_, AppState>) -> IpcResult<()> {
+    state
+        .core
+        .change_queued_task(&id, resume)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn checkpoints(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::workflows::Checkpoint>> {
+    state
+        .core
+        .checkpoints(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn create_checkpoint(
+    session_id: String,
+    label: String,
+    state: State<'_, AppState>,
+) -> IpcResult<agent_core::workflows::Checkpoint> {
+    state
+        .core
+        .create_checkpoint(&session_id, &label)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn checkpoint_diff(
+    session_id: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::workflows::CheckpointDiff>> {
+    state
+        .core
+        .checkpoint_diff(&session_id, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn restore_checkpoint_file(
+    session_id: String,
+    id: String,
+    path: String,
+    expected: String,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .restore_checkpoint_file(&session_id, &id, &path, &expected)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn delete_checkpoint(
+    session_id: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .delete_checkpoint(&session_id, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn branch_chat(
+    session_id: String,
+    isolated: bool,
+    state: State<'_, AppState>,
+) -> IpcResult<Session> {
+    state
+        .core
+        .branch_chat(&session_id, isolated)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn project_file_rules(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::claude::rules::FileRule>> {
+    state
+        .core
+        .project_file_rules(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn save_project_file_rules(
+    session_id: String,
+    rules: Vec<agent_core::claude::rules::FileRule>,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .save_project_file_rules(&session_id, rules)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_unity_adapter(root: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state
+        .core
+        .install_unity_adapter(root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn computer_status(state: State<'_, AppState>) -> IpcResult<agent_core::computer::Status> {
+    state
+        .core
+        .computer_status()
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn computer_windows(
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<agent_core::computer::WindowInfo>> {
+    state
+        .core
+        .computer_windows()
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn configure_computer(
+    session_id: String,
+    windows: Vec<String>,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .configure_computer(&session_id, windows)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn stop_computer(state: State<'_, AppState>) -> IpcResult<()> {
+    state.core.stop_computer().await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn approve_computer(
+    id: String,
+    allow: bool,
+    sensitive: bool,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
+    state
+        .core
+        .approve_computer(id, allow, sensitive)
+        .await
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 async fn attachment_image(
@@ -588,6 +826,9 @@ async fn open_releases(state: State<'_, AppState>, app: tauri::AppHandle) -> Ipc
 }
 
 fn main() {
+    if let Some(code) = agent_core::computer::entry() {
+        std::process::exit(code);
+    }
     if agent_core::claude::hook_entry() {
         return;
     }
@@ -686,6 +927,28 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            task_queue,
+            open_answer_link,
+            enqueue_task,
+            configure_conversation,
+            steer_message,
+            enqueue_message,
+            edit_queued_task,
+            change_queued_task,
+            checkpoints,
+            create_checkpoint,
+            checkpoint_diff,
+            restore_checkpoint_file,
+            delete_checkpoint,
+            branch_chat,
+            project_file_rules,
+            save_project_file_rules,
+            install_unity_adapter,
+            computer_status,
+            computer_windows,
+            configure_computer,
+            stop_computer,
+            approve_computer,
             snapshot,
             add_workspace,
             create_session,

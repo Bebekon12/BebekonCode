@@ -2,24 +2,41 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, ChevronDown, Search, Sparkles, RotateCcw, Zap } from 'lucide-react';
 import type { ModelInfo } from '../contracts';
 import { effortLabels } from '../chat';
+import { FastModeToggle } from './FastModeToggle';
 
 export function ReasoningSlider({
   model,
   value,
   change,
   disabled = false,
+  provider,
+  fastMode = false,
+  changeFastMode,
 }: {
   model?: ModelInfo;
   value: string | null;
   change: (value: string | null) => void;
   disabled?: boolean;
+  provider?: string;
+  fastMode?: boolean;
+  changeFastMode?: (enabled: boolean) => void;
 }) {
   const levels = ['', ...(model?.reasoning_efforts ?? [])];
   const index = Math.max(0, levels.indexOf(value ?? ''));
   return (
     <div className="reasoning-slider">
       <div>
-        <Zap size={18} className="effort-icon" aria-hidden="true" />
+        {provider && changeFastMode ? (
+          <FastModeToggle
+            provider={provider}
+            available={!!model?.fast_mode_available}
+            enabled={fastMode}
+            disabled={disabled}
+            change={changeFastMode}
+          />
+        ) : (
+          <Zap size={18} className="effort-icon" aria-hidden="true" />
+        )}
         <strong>
           {levels.length === 1
             ? 'Недоступно'
@@ -85,6 +102,9 @@ export function ModelPicker({
   disabled,
   change,
   label = 'Модель в чате',
+  provider,
+  fastMode = false,
+  changeFastMode,
 }: {
   models: ModelInfo[];
   model: string;
@@ -92,6 +112,9 @@ export function ModelPicker({
   disabled: boolean;
   change: (model: string, effort: string | null) => void;
   label?: string;
+  provider?: string;
+  fastMode?: boolean;
+  changeFastMode?: (enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -129,7 +152,7 @@ export function ModelPicker({
           setOpen(!open);
         }}
       >
-        <Sparkles size={15} />
+        {fastMode ? <Zap size={15} className="fast-mode-mark" /> : <Sparkles size={15} />}
         <span>{model === 'mock-stream-v1' ? 'Локальное демо' : (active?.name ?? model)}</span>
         {active?.reasoning_efforts?.length ? (
           <small className="trigger-effort">
@@ -174,6 +197,9 @@ export function ModelPicker({
           )}
           <ReasoningSlider
             model={active}
+            provider={provider}
+            fastMode={fastMode}
+            changeFastMode={changeFastMode}
             value={effort}
             disabled={disabled}
             change={(e) => change(model, e)}

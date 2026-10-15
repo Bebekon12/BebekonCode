@@ -173,8 +173,7 @@ test('codex account sign-in, usage limits and command approval', async ({ page }
   const approval = page.getByRole('alertdialog', { name: 'Codex хочет выполнить команду' });
   await expect(approval).toBeVisible();
   await expect(approval.getByText('npm test')).toBeVisible();
-  await expect(approval).toContainText('остальные команды и других участников');
-  await expect(approval.getByRole('button', { name: 'Разрешить в этом контексте' })).toHaveCount(0);
+  await expect(approval.getByRole('button', { name: 'Разрешить в чате' })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/approval.png', fullPage: true });
   await approval.getByRole('button', { name: 'Разрешить один раз' }).click();
   await expect(page.getByText('Разрешено один раз')).toBeVisible();

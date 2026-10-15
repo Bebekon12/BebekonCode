@@ -25,6 +25,8 @@ impl Storage {
         sqlx::query("UPDATE sessions SET status = 'interrupted' WHERE status = 'running'")
             .execute(&pool)
             .await?;
+        sqlx::query("UPDATE queued_tasks SET state='paused', error='Приложение перезапущено; подтвердите продолжение очереди' WHERE state IN ('queued','running')")
+            .execute(&pool).await?;
         Ok(Self { pool })
     }
 

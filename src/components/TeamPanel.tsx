@@ -57,7 +57,7 @@ export function TeamPanel({
       <summary>
         <Icon size={17} />
         <span>
-          {session.chat_mode === 'auto' ? 'Авторазбиение' : 'Команда'} ·{' '}
+          {session.chat_mode === 'auto' ? 'Автокоманда' : 'Команда'} ·{' '}
           {counted(members.length, ['агент', 'агента', 'агентов'])}
         </span>
         <ChevronDown size={14} />
@@ -82,14 +82,11 @@ export function TeamPanel({
                 </span>
                 <small>
                   {index === 0
-                    ? 'Проверяет и собирает итог'
-                    : member.permission_profile === 'read_only'
-                      ? 'Анализирует проект · только чтение'
-                      : member.permission_profile === 'workspace_auto'
-                        ? 'Изменяет проект · автоправки'
-                        : member.permission_profile === 'full_access'
-                          ? 'Полный доступ · без песочницы и подтверждений'
-                          : 'Изменяет проект · с подтверждениями'}
+                    ? 'Реализует, интегрирует и проверяет'
+                    : member.permission_profile === 'read_only' ||
+                        member.permission_profile === 'plan'
+                      ? 'Специалист по своей области · только чтение'
+                      : 'Своя область работы · выбранные права и инструменты'}
                 </small>
               </div>
               <button

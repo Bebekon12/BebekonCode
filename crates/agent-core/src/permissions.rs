@@ -27,7 +27,8 @@ pub enum Action {
 pub fn validate_profile(provider: &str, profile: &str) -> Result<()> {
     match profile {
         "standard" | "read_only" | "workspace_auto" => Ok(()),
-        "full_access" if matches!(provider, "openai" | "mock") => Ok(()),
+        "full_access" if matches!(provider, "openai" | "anthropic" | "mock") => Ok(()),
+        "claude_auto" | "plan" if provider == "anthropic" => Ok(()),
         "full_access" => Err(CoreError::Invalid(
             "Полный доступ доступен только для Codex (ChatGPT)".into(),
         )),
@@ -79,7 +80,7 @@ mod tests {
     #[test]
     fn full_access_is_codex_only() {
         assert!(validate_profile("openai", "full_access").is_ok());
-        assert!(validate_profile("anthropic", "full_access").is_err());
+        assert!(validate_profile("anthropic", "full_access").is_ok());
         assert!(validate_profile("anthropic", "workspace_auto").is_ok());
         assert!(validate_profile("openai", "everything").is_err());
     }

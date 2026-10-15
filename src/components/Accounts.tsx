@@ -105,8 +105,8 @@ export function ProviderAccounts({
       {!accounts.length && (
         <p className="muted small">
           {provider.id === 'anthropic'
-            ? 'Добавьте аккаунт Claude. Неизменённый официальный CLI откроет собственный вход Anthropic. Можно использовать поддерживаемую подписку или вход Console; использование оплачивается владельцем аккаунта.'
-            : 'Добавьте аккаунт ChatGPT. Вход и разрешение на использование плана выполняются на официальной странице OpenAI.'}
+            ? 'Добавьте аккаунт Claude: вход через официальный Claude Code.'
+            : 'Добавьте аккаунт ChatGPT: вход на странице OpenAI.'}
         </p>
       )}
       {adding ? (
@@ -223,17 +223,13 @@ function AccountCard({
           {status.usage.length > 0 && <UsageBars usage={status.usage} />}
           {status.limit_reached && (
             <p className="notice warning-notice">
-              Этот аккаунт достиг текущего лимита провайдера. BebekonCode не переключает аккаунты
-              автоматически — выберите другой аккаунт вручную при создании сессии.
+              Лимит аккаунта исчерпан. Другой аккаунт можно выбрать вручную.
             </p>
           )}
           {status.credits && <p className="muted small">Кредиты: {status.credits}</p>}
           {status.usage_error && <p className="notice warning-notice">{status.usage_error}</p>}
           {account.provider === 'openai' && status.auth_mode === 'siwc' && (
-            <p className="small muted">
-              Для лимитов можно войти через официальный Codex. Способ подключения этого профиля
-              сменится; выберите тот же аккаунт ChatGPT в браузере.
-            </p>
+            <p className="small muted">Для лимитов войдите через Codex тем же аккаунтом ChatGPT.</p>
           )}
           {status.message && (
             <details className="small muted">
@@ -303,10 +299,10 @@ function AccountCard({
       {signingIn && (
         <p className="muted small">
           {account.provider === 'anthropic'
-            ? 'Завершите штатный вход Claude Code в браузере. BebekonCode не получает пароль или токены. Если страница не открылась, используйте claude auth login с CLAUDE_CONFIG_DIR, указанным ниже.'
+            ? 'Завершите вход Claude Code в браузере.'
             : status?.auth_mode === 'codex'
-              ? 'Завершите официальный вход Codex в браузере. Выберите тот же аккаунт ChatGPT; учётные данные хранит CLI в защищённом хранилище ОС.'
-              : 'Завершите вход на открывшейся странице OpenAI в браузере. Пароль вводится только там; BebekonCode хранит выданные токены зашифрованными (Windows DPAPI) и передаёт их только процессу Codex этого аккаунта.'}
+              ? 'Завершите вход Codex в браузере тем же аккаунтом ChatGPT.'
+              : 'Завершите вход на странице OpenAI в браузере.'}
         </p>
       )}
       {account.provider === 'anthropic' && account.config_dir && (
@@ -320,7 +316,7 @@ function AccountCard({
             $env:CLAUDE_CONFIG_DIR = '{account.config_dir.replaceAll("'", "''")}'; claude auth login
             --console
           </code>
-          <p>Затем нажмите «Обновить». Все штатные способы входа CLI сохранены.</p>
+          <p>Затем нажмите «Обновить».</p>
         </details>
       )}
 
@@ -330,7 +326,7 @@ function AccountCard({
           (!signedIn || status?.usage_error) && (
             <button
               className="secondary-button"
-              title="Отдельный вход ChatGPT через официальный Codex в профиль этого аккаунта. Текущий способ подключения сменится; выберите тот же аккаунт в браузере."
+              title="Вход ChatGPT через Codex для этого аккаунта"
               disabled={busy || signingIn || status?.state === 'unavailable'}
               onClick={() =>
                 void run(async () => {
@@ -433,10 +429,7 @@ function AccountCard({
 
       {confirmRemove && (
         <div className="file-decision" role="alertdialog" aria-label="Удаление аккаунта">
-          <p>
-            Удалить «{account.label}»? Будет удалён локальный профиль провайдера, если он не
-            используется чатами. Учётная запись провайдера и ваши проекты сохранятся.
-          </p>
+          <p>Удалить «{account.label}»? Локальный профиль удалится, проекты останутся.</p>
           <div>
             <button className="secondary-button" onClick={() => setConfirmRemove(false)}>
               Отмена

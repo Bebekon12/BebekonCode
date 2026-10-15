@@ -1,6 +1,103 @@
 use super::*;
 use serde_json::json;
 
+#[cfg(windows)]
+#[tokio::test]
+async fn streamed_followup_is_acknowledged_in_same_cli_and_all_native_results_are_counted() {
+    use base64::Engine;
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into());
+    request.prompt = "[LIVE]".into();
+    let mut image = vec![0u8; 3 * 1024 * 1024];
+    image[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    let files = crate::attachments::prepare(
+        &request.session,
+        (0..2)
+            .map(|index| crate::attachments::Attachment {
+                name: format!("picture-{index}.png"),
+                mime: "image/png".into(),
+                data: base64::engine::general_purpose::STANDARD.encode(&image),
+            })
+            .collect(),
+    )
+    .unwrap();
+    let (input, rx) = mpsc::channel(8);
+    request.live_input = Some(Arc::new(tokio::sync::Mutex::new(rx)));
+    let (ack, acknowledged) = oneshot::channel();
+    input
+        .send(crate::conversation::Followup {
+            prompt: "Live addition".into(),
+            attachments: files,
+            acknowledged: ack,
+        })
+        .await
+        .unwrap();
+    let (tx, mut events) = mpsc::channel(64);
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        provider.run(request, tx, CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    acknowledged.await.unwrap().unwrap();
+    assert!(input.is_closed());
+    let mut usage = 0;
+    let mut output = String::new();
+    let mut diagnostic = false;
+    while let Some(event) = events.recv().await {
+        match event {
+            EventPayload::ProviderUsage {
+                input_tokens: Some(n),
+                ..
+            } => usage += n,
+            EventPayload::AssistantTextDelta { text } => output.push_str(&text),
+            EventPayload::ProviderDiagnostic { report } => {
+                assert_eq!(report.input_tokens, Some(15));
+                assert_eq!(report.model_requests, Some(3));
+                diagnostic = true;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(usage, 15);
+    assert!(diagnostic);
+    assert_eq!(output, "First result\n\nClaude fixture result");
+    assert_eq!(
+        std::fs::read_to_string(profile.join("fixture-invocations.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn closed_claude_stdout_does_not_wait_for_the_open_input_channel() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into());
+    request.prompt = "[EXIT_WITHOUT_RESULT]".into();
+    let (_input, rx) = mpsc::channel(8);
+    request.live_input = Some(Arc::new(tokio::sync::Mutex::new(rx)));
+    let (tx, _events) = mpsc::channel(64);
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        provider.run(request, tx, CancellationToken::new()),
+    )
+    .await
+    .unwrap();
+    assert!(result.is_err());
+}
+
 #[test]
 fn requires_supported_official_cli() {
     assert!(!version_supported(None));
@@ -10,11 +107,11 @@ fn requires_supported_official_cli() {
 
 #[cfg(windows)]
 #[tokio::test]
-async fn shell_and_mcp_always_require_fresh_consent_even_in_auto() {
+async fn manual_shell_and_mcp_require_fresh_consent() {
     let temp = crate::test_support::TestDirectory::new().unwrap();
     let provider = fixture_provider();
     let mut session = turn(temp.path()).session;
-    session.permission_profile = "workspace_auto".into();
+    session.permission_profile = "standard".into();
     let mut access = access::Access::default();
     access.mcp = vec![crate::mcp::LocalMcpServer {
         name: "unity".into(),
@@ -261,6 +358,80 @@ fn errors_and_incomplete_streams_never_become_success() {
 }
 
 #[test]
+fn replayed_events_and_tool_ids_do_not_duplicate_visible_activity() {
+    let mut state = mapping::StreamState::new(false);
+    let chunk = json!({"type":"stream_event","uuid":"chunk-1","event":{"delta":{"type":"text_delta","text":"ha"}}});
+    assert_eq!(state.accept(chunk.clone()).unwrap().len(), 1);
+    assert!(state.accept(chunk).unwrap().is_empty());
+    // Equal text with a new event ID is real output, not a duplicate.
+    assert_eq!(state.accept(json!({"type":"stream_event","uuid":"chunk-2","event":{"delta":{"type":"text_delta","text":"ha"}}})).unwrap().len(), 1);
+    let tool = json!({"type":"assistant","uuid":"assistant-1","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Write","input":{"file_path":"notes.txt","content":"private-content
+second"}}]}});
+    let activity = state.accept(tool.clone()).unwrap();
+    assert_eq!(activity.len(), 1);
+    let shown = serde_json::to_string(&activity).unwrap();
+    assert!(shown.contains("notes.txt") && !shown.contains("private-content"));
+    assert!(matches!(
+        &activity[0],
+        EventPayload::ToolStarted { added: Some(2), .. }
+    ));
+    assert!(state.accept(tool.clone()).unwrap().is_empty());
+    let mut repeated = tool;
+    repeated["uuid"] = json!("assistant-2");
+    assert!(state.accept(repeated).unwrap().is_empty());
+}
+
+#[test]
+fn session_limit_result_is_reported_as_a_usage_limit() {
+    let mut state = mapping::StreamState::new(false);
+    let error = state
+        .accept(json!({
+            "type": "result", "subtype": "error_during_execution", "is_error": true,
+            "result": "You've hit your session limit · resets 10:10pm (Europe/Moscow)"
+        }))
+        .unwrap_err();
+    assert!(matches!(error, CoreError::Provider { kind: Some(kind), .. } if kind == "usage_limit"));
+    assert!(state.finish().is_err());
+}
+
+#[test]
+fn usage_uses_per_turn_counters_and_never_sums_resumed_cumulative_cost_or_usage() {
+    let event = mapping::reported_usage(&json!({
+        "type":"result", "num_turns": 3,
+        "usage": {"input_tokens": 123,"output_tokens":45,"cache_read_input_tokens":900,"cache_creation_input_tokens":12},
+        "modelUsage": {"claude-opus-5-5":{"inputTokens":99999,"costUSD":999}},
+        "total_cost_usd":999, "private":"password=do-not-persist"
+    })).unwrap();
+    assert_eq!(
+        event,
+        EventPayload::ProviderUsage {
+            provider: "anthropic".into(),
+            model_requests: Some(3),
+            input_tokens: Some(123),
+            output_tokens: Some(45),
+            cache_read_tokens: Some(900),
+            cache_creation_tokens: Some(12),
+            reasoning_tokens: None,
+            incomplete: false,
+        }
+    );
+    assert!(
+        mapping::reported_usage(&json!({"type":"result","usage":{"input_tokens":-1}})).is_none()
+    );
+    assert!(mapping::reported_usage(
+        &json!({"type":"result","parent_tool_use_id":"child","num_turns":3})
+    )
+    .is_none());
+    assert!(mapping::reported_usage(
+        &json!({"type":"result","modelUsage":{"opus":{"inputTokens":999}}})
+    )
+    .is_none());
+    assert!(!serde_json::to_string(&event)
+        .unwrap()
+        .contains("do-not-persist"));
+}
+
+#[test]
 fn file_guard_rejects_escape_credentials_and_commands() {
     let temp = crate::test_support::TestDirectory::new().unwrap();
     std::fs::write(temp.path().join("a.txt"), "old").unwrap();
@@ -338,6 +509,7 @@ fn turn(root: &Path) -> TurnRequest {
         attachments: vec![],
         prompt: "Read project".into(),
         account,
+        live_input: None,
         output_schema: None,
         session: Session {
             id: Uuid::new_v4().to_string(),
@@ -358,7 +530,9 @@ fn turn(root: &Path) -> TurnRequest {
             parent_session_id: None,
             chat_mode: "single".into(),
             role: String::new(),
+            conversation_settings: "{}".into(),
             context_summary: String::new(),
+            fast_mode: false,
         },
     }
 }
@@ -405,6 +579,8 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
     let profile = temp.path().join("profile");
     std::fs::create_dir(&profile).unwrap();
     request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    request.session.model = "claude-opus-5-5".into();
+    request.session.fast_mode = true;
     request.prompt = "[WRITE]".into();
     let (tx, mut rx) = mpsc::channel(64);
     let engine = provider.clone();
@@ -412,11 +588,14 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
     let task = tokio::spawn(async move { engine.run(sent, tx, CancellationToken::new()).await });
     let mut thread = None;
     let mut text = String::new();
+    let mut usage_events = 0;
+    let mut reports = Vec::new();
     while let Some(event) = tokio::time::timeout(Duration::from_secs(15), rx.recv())
         .await
         .unwrap()
     {
         match event {
+            EventPayload::ProviderDiagnostic { report } => reports.push(report),
             EventPayload::ApprovalRequested { id, .. } => {
                 assert!(!temp.path().join("approved.txt").exists());
                 assert!(provider
@@ -430,16 +609,36 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
             }
             EventPayload::ProviderSession { id } => thread = Some(id),
             EventPayload::AssistantTextDelta { text: delta } => text.push_str(&delta),
+            EventPayload::ProviderUsage {
+                input_tokens,
+                cache_read_tokens,
+                model_requests,
+                ..
+            } => {
+                usage_events += 1;
+                assert_eq!(input_tokens, Some(10));
+                assert_eq!(cache_read_tokens, Some(20));
+                assert_eq!(model_requests, Some(2));
+            }
             _ => {}
         }
     }
     task.await.unwrap().unwrap();
     assert_eq!(text, "Claude fixture result");
+    assert_eq!(usage_events, 1);
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].status, "completed");
+    assert_eq!(reports[0].approval_requests, 1);
+    assert_eq!(reports[0].input_tokens, Some(10));
+    assert_eq!(reports[0].account_profile_id, request.account.id);
+    assert_eq!(reports[0].provider_session_id, thread);
+    assert!(!reports[0].resumed);
     assert_eq!(
         std::fs::read_to_string(temp.path().join("approved.txt")).unwrap(),
         "Approved through the local pipe"
     );
     request.session.provider_session_id = thread.clone();
+    request.session.fast_mode = false;
     request.prompt = "Continue".into();
     let (tx, mut rx) = mpsc::channel(64);
     provider
@@ -448,11 +647,28 @@ async fn real_subprocess_pipe_approval_resume_and_account_binding() {
         .unwrap();
     let mut resumed = None;
     while let Some(event) = rx.recv().await {
+        if let EventPayload::ProviderDiagnostic { report } = &event {
+            assert!(report.resumed);
+            assert_eq!(report.provider_session_id, thread);
+            assert_ne!(report.request_id, reports[0].request_id);
+            assert_eq!(report.approval_requests, 0);
+        }
         if let EventPayload::ProviderSession { id } = event {
             resumed = Some(id);
         }
     }
     assert_eq!(thread, resumed);
+    let launches: Vec<serde_json::Value> =
+        std::fs::read_to_string(profile.join("fixture-invocations.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(launches[0]["fast_mode"], true);
+    assert_eq!(launches[1]["fast_mode"], false);
+    assert_eq!(launches[0]["id"], launches[1]["id"]);
+    assert_eq!(launches[0]["model"], "claude-opus-5-5");
     request.account.id = "other-account".into();
     let (tx, _) = mpsc::channel(4);
     assert!(provider
@@ -496,12 +712,23 @@ async fn read_only_denial_cancellation_and_usage_limit_stop_the_process() {
         .unwrap()
         .unwrap();
     request.prompt = "[LIMIT]".into();
-    let (tx, _rx) = mpsc::channel(64);
+    let (tx, mut failure_rx) = mpsc::channel(64);
     let error = provider
         .run(request, tx, CancellationToken::new())
         .await
         .unwrap_err();
     assert!(matches!(error, CoreError::Provider { kind:Some(kind), .. } if kind == "usage_limit"));
+    let mut reports = Vec::new();
+    while let Some(event) = failure_rx.recv().await {
+        if let EventPayload::ProviderDiagnostic { report } = event {
+            reports.push(report);
+        }
+    }
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].status, "failed");
+    assert_eq!(reports[0].error_kind.as_deref(), Some("usage_limit"));
+    assert!(!reports[0].usage_reported);
+    assert_eq!(reports[0].input_tokens, None);
 }
 
 #[cfg(windows)]
@@ -594,6 +821,38 @@ async fn session_grants_cover_one_file_and_cancellation_denies_pending_writes() 
     )
     .await;
     assert_eq!(same["hookSpecificOutput"]["decision"]["behavior"], "allow");
+    // A handoff can keep the local chat ID while changing the bound account.
+    let mut rebound = session.clone();
+    rebound.account_profile_id = "other-profile".into();
+    let waiting = launch(rebound.clone(), input.clone(), CancellationToken::new());
+    let id = next_approval(&mut rx).await;
+    provider
+        .resolve_approval(&rebound.id, &id, ApprovalDecision::Deny)
+        .await
+        .unwrap();
+    assert_eq!(
+        waiting.await.unwrap()["hookSpecificOutput"]["decision"]["behavior"],
+        "deny"
+    );
+    // Non-interactive mode rejects unexpected provider asks without an approval card.
+    while let Ok(event) = rx.try_recv() {
+        assert!(!matches!(event, EventPayload::ApprovalRequested { .. }));
+    }
+    let mut auto = session.clone();
+    auto.permission_profile = "workspace_auto".into();
+    let waiting = launch(auto.clone(), input.clone(), CancellationToken::new());
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap()["hookSpecificOutput"]["decision"]["behavior"],
+        "deny"
+    );
+    assert!(rx.try_recv().is_err());
+    let mut unrelated = turn(temp.path()).account;
+    unrelated.id = "unrelated".into();
+    provider.release_account(&unrelated).await;
+    assert_eq!(provider.grants.lock().unwrap().len(), 1);
     let mut other = input.clone();
     other["tool_input"]["file_path"] = json!("two.txt");
     let waiting = launch(session.clone(), other, cancel.clone());
@@ -648,6 +907,7 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
         .await
         .unwrap();
     let config = AgentConfig {
+        fast_mode: false,
         provider: "anthropic".into(),
         account_profile_id: account.id,
         model: "sonnet".into(),
@@ -657,6 +917,7 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
         role: "Claude reviewer".into(),
     };
     let demo = AgentConfig {
+        fast_mode: false,
         provider: "mock".into(),
         account_profile_id: "mock-local".into(),
         model: "mock-stream-v1".into(),
@@ -716,16 +977,21 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
         .await
         .unwrap();
     settle(&core, &auto.id).await;
-    let task = core
+    assert!(!core
         .storage
         .sessions()
         .await
         .unwrap()
-        .into_iter()
-        .find(|s| s.parent_session_id.as_deref() == Some(&auto.id) && s.chat_mode == "task")
-        .unwrap();
-    assert_eq!(task.provider, "anthropic");
-    assert_eq!(task.permission_profile, "read_only");
+        .iter()
+        .any(|s| s.parent_session_id.as_deref() == Some(&auto.id) && s.chat_mode == "task"));
+    let auto_events = core.storage.events(&auto.id, None).await.unwrap();
+    assert_eq!(
+        auto_events
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::ProviderRunStarted { .. }))
+            .count(),
+        1
+    );
     core.handoff(&team.id, demo).await.unwrap();
     settle(&core, &team.id).await;
     let handed = core.storage.session(&team.id).await.unwrap();
@@ -733,4 +999,513 @@ async fn mixed_team_auto_and_handoff_use_claude_adapter_and_preserve_results() {
     assert!(handed.provider_session_id.is_none());
     assert!(!handed.context_summary.is_empty());
     core.shutdown().await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn accept_edits_reaches_cli_and_applies_only_to_guarded_project_files() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    request.session.permission_profile = "workspace_auto".into();
+    request.prompt = "[WRITE]".into();
+    let (tx, mut rx) = mpsc::channel(64);
+    tokio::time::timeout(
+        Duration::from_secs(15),
+        provider.run(request, tx, CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(temp.path().join("approved.txt").exists());
+    let mut report_count = 0;
+    while let Some(event) = rx.recv().await {
+        assert!(!matches!(event, EventPayload::ApprovalRequested { .. }));
+        if let EventPayload::ProviderDiagnostic { report } = event {
+            assert_eq!(report.permission_profile, "workspace_auto");
+            assert_eq!(report.approval_requests, 0);
+            report_count += 1;
+        }
+    }
+    assert_eq!(report_count, 1);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn cancellation_does_not_wait_for_a_full_diagnostic_consumer() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let (tx, _rx) = mpsc::channel(1);
+    tx.send(EventPayload::TurnStarted {
+        prompt: "queued".into(),
+    })
+    .await
+    .unwrap();
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        provider.run(turn(temp.path()), tx, cancel),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(provider.running.lock().unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn native_modes_and_persistent_rules_reach_cli_without_changing_account() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    let mut request = turn(temp.path());
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    request.prompt = "[WRITE]".into();
+    for mode in ["workspace_auto", "full_access", "claude_auto", "plan"] {
+        let provider = fixture_provider();
+        request.session.permission_profile = mode.into();
+        let output = temp.path().join("approved.txt");
+        let _ = std::fs::remove_file(&output);
+        let (tx, mut rx) = mpsc::channel(64);
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            provider.run(request.clone(), tx, CancellationToken::new()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(output.exists(), mode != "plan");
+        while let Some(event) = rx.recv().await {
+            assert!(!matches!(event, EventPayload::ApprovalRequested { .. }));
+        }
+    }
+    request.session.permission_profile = "standard".into();
+    let rule = rules::FileRule {
+        root: temp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        path: "approved.txt".into(),
+        tool: "Write".into(),
+    };
+    rules::save(&request.account, &request.session, vec![rule.clone()]).unwrap();
+    assert_eq!(
+        rules::read(&request.account, &request.session)
+            .unwrap()
+            .len(),
+        1
+    );
+    let new_provider = fixture_provider();
+    let (tx, mut rx) = mpsc::channel(64);
+    tokio::time::timeout(
+        Duration::from_secs(15),
+        new_provider.run(request.clone(), tx, CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    while let Some(event) = rx.recv().await {
+        assert!(!matches!(event, EventPayload::ApprovalRequested { .. }));
+    }
+    assert!(temp.path().join("approved.txt").exists());
+    let mut unsafe_rule = rule;
+    unsafe_rule.path = ".env".into();
+    assert!(rules::save(&request.account, &request.session, vec![unsafe_rule]).is_err());
+    rules::save(&request.account, &request.session, vec![]).unwrap();
+    assert!(rules::read(&request.account, &request.session)
+        .unwrap()
+        .is_empty());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn automatic_modes_do_not_prompt_for_selected_tools_or_escalations() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut session = turn(temp.path()).session;
+    let mut access = access::Access::default();
+    access.mcp = vec![crate::mcp::LocalMcpServer {
+        name: "unity".into(),
+        command: "fixture".into(),
+        args: vec![],
+    }];
+    let (tx, mut rx) = mpsc::channel(64);
+    for mode in ["workspace_auto", "full_access", "claude_auto"] {
+        session.permission_profile = mode.into();
+        let settings = guard::settings("fixture", Path::new("fixture.exe"), mode, true);
+        assert_eq!(settings["permissions"]["ask"], json!([]));
+        if mode == "workspace_auto" {
+            assert_eq!(settings["permissions"]["defaultMode"], "dontAsk");
+            for tool in ["Bash", "PowerShell", "Edit", "Write", "mcp__*"] {
+                assert!(settings["permissions"]["allow"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!(tool)));
+            }
+        }
+        for (tool, input) in [
+            ("Bash", json!({"command":"echo safe"})),
+            ("PowerShell", json!({"command":"Write-Output safe"})),
+            ("mcp__unity__capture_scene_view", json!({"scene":"test"})),
+            ("Write", json!({"file_path":"safe.txt", "content":"test"})),
+        ] {
+            for _ in 0..2 {
+                let value =
+                    json!({"hook_event_name":"PreToolUse", "tool_name":tool, "tool_input":input});
+                let result = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    guard::decide_with_access(
+                        &session,
+                        value.clone(),
+                        &tx,
+                        &CancellationToken::new(),
+                        &provider.pending,
+                        &provider.grants,
+                        &access,
+                    ),
+                )
+                .await
+                .unwrap();
+                assert_eq!(result, json!({}), "{mode}/{tool}");
+                if mode != "claude_auto" {
+                    let mut permission = value;
+                    permission["hook_event_name"] = json!("PermissionRequest");
+                    let result = tokio::time::timeout(
+                        Duration::from_secs(1),
+                        guard::decide_with_access(
+                            &session,
+                            permission,
+                            &tx,
+                            &CancellationToken::new(),
+                            &provider.pending,
+                            &provider.grants,
+                            &access,
+                        ),
+                    )
+                    .await
+                    .unwrap();
+                    assert_eq!(result["hookSpecificOutput"]["decision"]["behavior"], "deny");
+                }
+            }
+        }
+        for (tool, input) in [
+            ("Bash", json!({"command":"cat ~/.claude/.credentials.json"})),
+            ("mcp__unselected__run", json!({"scene":"test"})),
+        ] {
+            let answer = guard::decide_with_access(
+                &session,
+                json!({"hook_event_name":"PreToolUse","tool_name":tool,"tool_input":input}),
+                &tx,
+                &CancellationToken::new(),
+                &provider.pending,
+                &provider.grants,
+                &access,
+            )
+            .await;
+            assert_eq!(answer["hookSpecificOutput"]["permissionDecision"], "deny");
+        }
+        assert!(provider.pending.lock().unwrap().is_empty());
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[test]
+fn saved_file_rule_remains_revocable_when_its_parent_is_removed() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into_owned());
+    let nested = temp.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    rules::save(
+        &request.account,
+        &request.session,
+        vec![rules::FileRule {
+            root: temp
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            path: "nested/new.txt".into(),
+            tool: "Write".into(),
+        }],
+    )
+    .unwrap();
+    std::fs::remove_dir(nested).unwrap();
+    assert_eq!(
+        rules::read(&request.account, &request.session)
+            .unwrap()
+            .len(),
+        1
+    );
+    rules::save(&request.account, &request.session, vec![]).unwrap();
+    assert!(rules::read(&request.account, &request.session)
+        .unwrap()
+        .is_empty());
+}
+#[test]
+fn context_counts_latest_input_with_cache_not_cumulative_billing_and_resets_on_compact() {
+    let mut state = mapping::StreamState::new(false);
+    let events=state.accept(json!({"type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":90,"cache_creation_input_tokens":20},"content":[]}})).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        EventPayload::ContextUsage {
+            used_tokens: Some(120),
+            window_tokens: None,
+            ..
+        }
+    )));
+    let events=state.accept(json!({"type":"result","subtype":"success","is_error":false,"modelUsage":{"test-model":{"contextWindow":200000,"inputTokens":5000000}},"usage":{"input_tokens":999999}})).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        EventPayload::ContextUsage {
+            used_tokens: Some(120),
+            window_tokens: Some(200000),
+            ..
+        }
+    )));
+    let events = state
+        .accept(json!({"type":"system","subtype":"compact_boundary"}))
+        .unwrap();
+    assert!(events.contains(&EventPayload::ContextCompacted {}));
+    let events=state.accept(json!({"type":"assistant","parent_tool_use_id":"child","message":{"usage":{"input_tokens":777},"content":[]}})).unwrap();
+    assert!(events.is_empty());
+}
+#[cfg(windows)]
+#[tokio::test]
+async fn compact_uses_native_command_with_no_tools_and_explicit_context_settings() {
+    let temp = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut request = turn(temp.path());
+    let profile = temp.path().join("profile");
+    std::fs::create_dir(&profile).unwrap();
+    request.account.config_dir = Some(profile.to_string_lossy().into());
+    request.session.provider_session_id = Some(Uuid::new_v4().to_string());
+    request.session.conversation_settings =
+        r#"{"compact_tokens":200000,"claude_compact_percent":70}"#.into();
+    request.prompt = "/compact".into();
+    let (tx, mut rx) = mpsc::channel(32);
+    provider
+        .run(request, tx, CancellationToken::new())
+        .await
+        .unwrap();
+    let mut compacted = false;
+    while let Some(event) = rx.recv().await {
+        compacted |= matches!(event, EventPayload::ContextCompacted {});
+    }
+    assert!(compacted);
+    let record: Value = serde_json::from_str(
+        std::fs::read_to_string(profile.join("fixture-invocations.jsonl"))
+            .unwrap()
+            .trim(),
+    )
+    .unwrap();
+    assert_eq!(record["compact_window"], "200000");
+    assert_eq!(record["compact_percent"], "70");
+    assert_eq!(record["tools"], "");
+}
+
+#[test]
+fn tool_rows_are_short_redacted_and_task_lists_are_tracked() {
+    let mut state = mapping::StreamState::new(false);
+    let events = state
+        .accept(json!({"type":"assistant","message":{"content":[
+            {"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm test","description":"Run tests"}},
+            {"type":"tool_use","id":"t2","name":"Bash","input":{"command":"curl -H 'Authorization: Bearer abc123'\nsecond line"}},
+            {"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"src/a.rs","old_string":"a","new_string":"b\nc"}},
+            {"type":"tool_use","id":"t4","name":"TodoWrite","input":{"todos":[{"content":"Step one","status":"completed"},{"content":"Step two","status":"in_progress"}]}},
+            {"type":"tool_use","id":"t5","name":"TaskCreate","input":{"subject":"Build","description":"private"}},
+            {"type":"tool_use","id":"t6","name":"ToolSearch","input":{"query":"unity"}},
+            {"type":"tool_use","id":"t7","name":"mcp__unity__editor_status","input":{}}
+        ]}}))
+        .unwrap();
+    let shown = serde_json::to_string(&events).unwrap();
+    assert!(
+        !shown.contains("abc123") && !shown.contains("second line") && !shown.contains("private")
+    );
+    assert!(
+        matches!(&events[0], EventPayload::ToolStarted { kind, summary, .. } if kind == "command" && summary == "Run tests")
+    );
+    assert!(
+        matches!(&events[2], EventPayload::ToolStarted { kind, added: Some(2), removed: Some(1), .. } if kind == "edit")
+    );
+    assert!(
+        matches!(&events[3], EventPayload::TodoUpdate { replace: true, items } if items.len() == 2 && items[1].status.as_deref() == Some("in_progress"))
+    );
+    assert!(
+        matches!(&events[4], EventPayload::ToolStarted { kind, summary, .. } if kind == "mcp" && summary == "unity · editor_status")
+    );
+    assert_eq!(events.len(), 5);
+    let finished = state
+        .accept(json!({"type":"user","message":{"content":[
+            {"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"failed"},
+            {"type":"tool_result","tool_use_id":"t5","content":[{"type":"text","text":"Task #3 created successfully: Build"}]}
+        ]}}))
+        .unwrap();
+    assert_eq!(
+        finished,
+        vec![
+            EventPayload::ToolFinished {
+                id: "t1".into(),
+                failed: true
+            },
+            EventPayload::TodoUpdate {
+                replace: false,
+                items: vec![crate::model::TodoItem {
+                    id: Some("3".into()),
+                    content: Some("Build".into()),
+                    status: Some("pending".into()),
+                }],
+            },
+        ]
+    );
+}
+
+#[test]
+fn credential_check_ignores_code_that_only_mentions_environment() {
+    for safe in [
+        "node -e \"console.log(process.env.HOME)\"",
+        "var p = System.Environment.GetFolderPath(0);",
+        "python -c 'import os; print(os.environ)'",
+        "cat CLAUDE.md",
+    ] {
+        assert!(!guard::touches_credentials(safe), "{safe}");
+    }
+    for blocked in [
+        "type .env",
+        "cat config/.env.local",
+        "cat ~/.claude/.credentials.json",
+        "ls C:\\Users\\me\\.ssh",
+        "cmdkey /list",
+    ] {
+        assert!(guard::touches_credentials(blocked), "{blocked}");
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn automatic_modes_accept_long_commands_internal_tools_and_memory() {
+    let profile = crate::test_support::TestDirectory::new().unwrap();
+    let project = crate::test_support::TestDirectory::new().unwrap();
+    let provider = fixture_provider();
+    let mut request = turn(project.path());
+    request.account.config_dir = Some(profile.path().to_string_lossy().into_owned());
+    let (tx, _rx) = mpsc::channel(64);
+    let decide = |session: Session, access: access::Access, tool: &str, input: Value| {
+        let provider = provider.clone();
+        let tx = tx.clone();
+        let value = json!({"hook_event_name":"PreToolUse","tool_name":tool,"tool_input":input});
+        async move {
+            guard::decide_with_access(
+                &session,
+                value,
+                &tx,
+                &CancellationToken::new(),
+                &provider.pending,
+                &provider.grants,
+                &access,
+            )
+            .await
+        }
+    };
+    let long = format!("echo {}", "x".repeat(6000));
+    for mode in [
+        "standard",
+        "workspace_auto",
+        "full_access",
+        "claude_auto",
+        "read_only",
+    ] {
+        request.session.permission_profile = mode.into();
+        let access = access::Access::for_request(&request).unwrap();
+        let projects = profile.path().join("projects");
+        let key = std::fs::read_dir(&projects)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let memory = key.path().join("memory").join("MEMORY.md");
+        std::fs::write(&memory, "- note").unwrap();
+        let session = request.session.clone();
+        let write = decide(
+            session.clone(),
+            access.clone(),
+            "Write",
+            json!({"file_path":memory,"content":"- note"}),
+        )
+        .await;
+        let read = decide(
+            session.clone(),
+            access.clone(),
+            "Read",
+            json!({"file_path":memory}),
+        )
+        .await;
+        assert_eq!(
+            read["hookSpecificOutput"]["permissionDecision"], "allow",
+            "{mode}"
+        );
+        for tool in ["TodoWrite", "ToolSearch"] {
+            assert_eq!(
+                decide(session.clone(), access.clone(), tool, json!({})).await,
+                json!({})
+            );
+        }
+        if mode == "read_only" {
+            assert_eq!(write["hookSpecificOutput"]["permissionDecision"], "deny");
+            continue;
+        }
+        assert_eq!(
+            write["hookSpecificOutput"]["permissionDecision"], "allow",
+            "{mode}"
+        );
+        for command in [
+            long.as_str(),
+            "node -e \"process.env.X\"",
+            "echo password=1",
+        ] {
+            let answer = decide(
+                session.clone(),
+                access.clone(),
+                "Bash",
+                json!({ "command": command }),
+            )
+            .await;
+            let expected = if mode == "standard" {
+                json!("ask")
+            } else {
+                Value::Null
+            };
+            assert_eq!(
+                answer["hookSpecificOutput"]["permissionDecision"],
+                expected,
+                "{mode}: {}",
+                &command[..20.min(command.len())]
+            );
+        }
+        let other = decide(
+            session.clone(),
+            access.clone(),
+            "Write",
+            json!({"file_path":profile.path().join("settings.json"),"content":"{}"}),
+        )
+        .await;
+        assert_eq!(
+            other["hookSpecificOutput"]["permissionDecision"], "deny",
+            "{mode}"
+        );
+    }
+    let settings = guard::settings("fixture", Path::new("fixture.exe"), "full_access", false);
+    assert!(settings["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("Agent")));
 }

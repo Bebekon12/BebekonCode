@@ -116,6 +116,122 @@ function previewStatus(accountId: string): AccountStatus {
 const reviewComments: ReviewComment[] = [];
 const localMcp = new Map<string, LocalMcpServer[]>();
 export const preview: ClientTransport = {
+  configureConversation: async (id, settings) => {
+    const session = state.sessions.find((s) => s.id === id);
+    if (!session || session.status === 'running') throw new Error('Чат занят');
+    session.conversation_settings = JSON.stringify(settings);
+    return structuredClone(session);
+  },
+  steerMessage: async (id, run, prompt, attachments) => {
+    const session = state.sessions.find((s) => s.id === id);
+    if (
+      session?.status !== 'running' ||
+      !['openai', 'anthropic'].includes(session.provider) ||
+      history.filter((e) => e.session_id === id && e.payload.type === 'turn_started').at(-1)
+        ?.run_id !== run
+    )
+      throw new Error('Активный ход недоступен');
+    const event: AgentEvent = {
+      sequence: ++sequence,
+      session_id: id,
+      run_id: run,
+      timestamp: now(),
+      payload: {
+        type: 'user_followup',
+        prompt,
+        files: attachments.map((f) => ({
+          name: f.name,
+          mime: f.mime,
+          path: 'Предпросмотр/' + f.name,
+        })),
+      },
+    };
+    history.push(event);
+    listeners.forEach((fn) => fn(event));
+  },
+  enqueueMessage: async (id, prompt, attachments) => {
+    const task = await preview.enqueueTask(id, prompt);
+    const item = previewQueue.find((t) => t.id === task);
+    if (item) item.attachments = JSON.stringify(attachments.map((f) => ({ name: f.name })));
+    return task;
+  },
+  editQueuedTask: async (id, prompt, direction) => {
+    const index = previewQueue.findIndex((t) => t.id === id);
+    if (index < 0 || !['queued', 'paused'].includes(previewQueue[index]!.state))
+      throw new Error('Задание уже выполняется');
+    previewQueue[index]!.prompt = prompt;
+    const target = index + direction;
+    if (target >= 0 && target < previewQueue.length && direction)
+      [previewQueue[index], previewQueue[target]] = [previewQueue[target]!, previewQueue[index]!];
+  },
+  taskQueue: async () => structuredClone(previewQueue),
+  enqueueTask: async (session_id, prompt) => {
+    const id = crypto.randomUUID();
+    previewQueue.push({
+      id,
+      session_id,
+      prompt,
+      state: 'queued',
+      run_id: null,
+      error: 'Предпросмотр: очередь не запускает агентов',
+      created_at: now(),
+    });
+    return id;
+  },
+  changeQueuedTask: async (id, resume) => {
+    const task = previewQueue.find((t) => t.id === id);
+    if (task) task.state = resume ? 'queued' : 'cancelled';
+  },
+  checkpoints: async () => [],
+  createCheckpoint: async () => {
+    throw new Error('Контрольные точки файлов доступны в установленном приложении.');
+  },
+  checkpointDiff: async () => [],
+  restoreCheckpointFile: async () => {
+    throw new Error('В предпросмотре файлы не изменяются.');
+  },
+  deleteCheckpoint: async () => {},
+  branchChat: async (id, isolated) => {
+    if (isolated) throw new Error('Git worktree доступен в установленном приложении.');
+    const source = state.sessions.find((s) => s.id === id);
+    if (!source) throw new Error('Чат не найден');
+    const child = {
+      ...structuredClone(source),
+      id: crypto.randomUUID(),
+      title: `Ветка · ${source.title}`,
+      provider_session_id: null,
+      status: 'idle' as const,
+    };
+    state.sessions.push(child);
+    return child;
+  },
+  projectFileRules: async (id) => structuredClone(previewFileRules.get(id) ?? []),
+  saveProjectFileRules: async (id, rules) => {
+    previewFileRules.set(id, structuredClone(rules));
+  },
+  installUnityAdapter: async () => {
+    throw new Error('Установка Unity Adapter доступна в приложении Windows.');
+  },
+  computerStatus: async () => ({
+    available: false,
+    enabled: false,
+    stopped: false,
+    executing: false,
+    owner_session: null,
+    windows: [],
+    pending: null,
+    metrics: {},
+    audit: [],
+    detail: 'Smart Computer работает в приложении Windows. Предпросмотр не управляет компьютером.',
+  }),
+  computerWindows: async () => [],
+  configureComputer: async () => {
+    throw new Error('Управление компьютером доступно в приложении Windows.');
+  },
+  stopComputer: async () => {},
+  approveComputer: async () => {
+    throw new Error('Предпросмотр не выполняет действия на компьютере.');
+  },
   accountMcp: async (id) => structuredClone(localMcp.get(id) ?? []),
   saveAccountMcp: async (id, servers) => {
     if (new Set(servers.map((s) => s.name)).size !== servers.length)
@@ -218,6 +334,7 @@ export const preview: ClientTransport = {
       created_at: now(),
       updated_at: now(),
       reasoning_effort: null,
+      fast_mode: false,
       tool_policy: '{}',
       parent_session_id: null,
       chat_mode: 'single' as const,
@@ -251,6 +368,7 @@ export const preview: ClientTransport = {
       const stored = state.sessions.find((s) => s.id === session.id)!;
       Object.assign(stored, {
         reasoning_effort: agent.reasoning_effort,
+        fast_mode: index > 0 && input.mode === 'auto' ? false : (agent.fast_mode ?? false),
         tool_policy: JSON.stringify(agent.tools),
         role: agent.role,
         chat_mode: index === 0 ? input.mode : 'single',
@@ -264,6 +382,15 @@ export const preview: ClientTransport = {
   configureSession: async (id, config) => {
     const session = state.sessions.find((s) => s.id === id);
     if (!session || session.status === 'running') throw new Error('Чат занят');
+    const parent = state.sessions.find((s) => s.id === session.parent_session_id);
+    if (session.chat_mode === 'task')
+      throw new Error('Измените настройки участника в составе команды');
+    if (parent?.status === 'running') throw new Error('Команда занята');
+    if (
+      parent?.chat_mode === 'auto' &&
+      (config.permission_profile === 'full_access' || config.fast_mode)
+    )
+      throw new Error('Полный доступ и Fast недоступны автоматическим участникам');
     if (config.account_profile_id !== session.account_profile_id)
       throw new Error('Используйте переход с контекстом');
     Object.assign(session, {
@@ -278,6 +405,8 @@ export const preview: ClientTransport = {
     if (!session || session.status === 'running') throw new Error('Чат занят');
     Object.assign(session, config, {
       tool_policy: JSON.stringify(config.tools),
+      chat_mode: 'single',
+      provider_session_id: null,
       context_summary: 'Предпросмотр: настоящая передача контекста работает в приложении.',
     });
     return crypto.randomUUID();
@@ -317,18 +446,64 @@ export const preview: ClientTransport = {
       model: session.model,
       account_profile_id: session.account_profile_id,
       reasoning_effort: session.reasoning_effort,
+      fast_mode: session.fast_mode ?? false,
     });
     void (async () => {
       // Preview-only sample rows for UI work; nothing here touches the disk.
-      for (const [label, detail] of [
-        ['Демонстрация планирования', 'Файлы не читались, команды не выполнялись.'],
-        ['Просмотр структуры', './ · пример для предпросмотра'],
-        ['Чтение файла', 'package.json · пример для предпросмотра'],
-      ] as const) {
-        await wait(120);
+      const say = async (text: string) => {
+        for (const word of text.split(/(?<= )/u)) {
+          await wait(20);
+          if (cancelled.has(sessionId)) return;
+          emit({ type: 'assistant_text_delta', text: word });
+        }
+      };
+      const goals = [
+        'Изучить структуру проекта',
+        'Найти обработчик событий',
+        'Внести правку',
+        'Проверить сборку',
+      ];
+      const plan = (done: number) =>
+        emit({
+          type: 'todo_update',
+          replace: true,
+          items: goals.map((content, index) => ({
+            content,
+            status: index < done ? 'completed' : index === done ? 'in_progress' : 'pending',
+          })),
+        });
+      await say('Смотрю структуру проекта. ');
+      plan(0);
+      for (const [index, [kind, summary]] of (
+        [
+          ['command', 'Список файлов проекта'],
+          ['search', 'EventHandler'],
+          ['read', 'src/handlers/events.ts'],
+          ['command', 'npm run typecheck'],
+        ] as const
+      ).entries()) {
         if (cancelled.has(sessionId)) break;
-        emit({ type: 'tool_activity', label, detail });
+        const id = `${run}-${index}`;
+        emit({ type: 'tool_started', id, tool: kind, kind, summary });
+        await wait(160);
+        emit({ type: 'tool_finished', id, failed: index === 3 });
+        if (index === 1) plan(1);
       }
+      plan(2);
+      await say('\n\nНашёл обработчик, вношу правку. ');
+      emit({
+        type: 'tool_started',
+        id: `${run}-edit`,
+        tool: 'Write',
+        kind: 'create',
+        summary: 'src/handlers/ChangedEventHandler.ts',
+        added: 69,
+        removed: null,
+      });
+      await wait(160);
+      emit({ type: 'tool_finished', id: `${run}-edit`, failed: false });
+      plan(4);
+      await say('\n\n');
       if (session.provider === 'openai' && !cancelled.has(sessionId)) {
         const id = crypto.randomUUID();
         const decision = new Promise<string>((resolve) =>
@@ -450,6 +625,7 @@ export const preview: ClientTransport = {
         name: `Claude ${id}`,
         description: 'Псевдоним CLI · предпросмотр',
         is_default: id === 'sonnet',
+        fast_mode_available: id === 'claude-opus-5-5',
         reasoning_efforts:
           id === 'claude-opus-4-6'
             ? ['low', 'medium', 'high', 'max']
@@ -460,6 +636,7 @@ export const preview: ClientTransport = {
         id: 'preview-model',
         name: 'Модель предпросмотра',
         description: 'Имитация каталога Codex',
+        fast_mode_available: true,
         is_default: true,
         reasoning_efforts: ['low', 'medium', 'high'],
       },
@@ -600,6 +777,7 @@ export const preview: ClientTransport = {
     current_version: pkg.version,
     latest_version: null,
     available: false,
+    executing: false,
     notes: 'Проверка обновлений работает в приложении. Предпросмотр не обращается к GitHub.',
     published_at: null,
     release_url: `https://github.com/${product.repository}/releases`,
@@ -613,3 +791,5 @@ export const preview: ClientTransport = {
     );
   },
 };
+const previewQueue: import('./contracts').QueuedTask[] = [];
+const previewFileRules = new Map<string, import('./contracts').FileRule[]>();

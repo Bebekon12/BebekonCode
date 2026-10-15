@@ -16,6 +16,7 @@ pub mod plugins;
 mod rpc;
 mod sandbox;
 pub mod siwc;
+mod usage;
 
 use crate::{
     error::{CoreError, Result},
@@ -39,6 +40,25 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+fn approval_policy(profile: &str) -> &'static str {
+    match profile {
+        "workspace_auto" | "full_access" => "never",
+        _ => "on-request",
+    }
+}
+
+fn effective_tools(session: &Session) -> Result<ToolPolicy> {
+    if session.permission_profile == "read_only" {
+        Ok(ToolPolicy {
+            plugins: Some(vec![]),
+            mcp_servers: Some(vec![]),
+            skills: Some(vec![]),
+        })
+    } else {
+        Ok(serde_json::from_str(&session.tool_policy)?)
+    }
+}
 
 pub const PROVIDER_ID: &str = "openai";
 /// Protocol version this adapter was verified against. Newer versions are allowed but flagged.
@@ -66,6 +86,7 @@ struct AppServer {
     token_expires_at: Option<i64>,
     /// Threads already started or resumed on this process.
     loaded: Mutex<HashSet<String>>,
+    usage_totals: Mutex<HashMap<String, usage::Totals>>,
     stderr: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -103,6 +124,7 @@ struct PendingApproval {
 }
 
 pub struct CodexProvider {
+    computer: Option<Arc<smart_computer::manager::Manager>>,
     detection: RwLock<Detection>,
     servers: tokio::sync::Mutex<HashMap<String, Arc<AppServer>>>,
     approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
@@ -113,8 +135,51 @@ pub struct CodexProvider {
 }
 
 impl CodexProvider {
+    async fn run_observed(
+        &self,
+        request: TurnRequest,
+        events: mpsc::Sender<EventPayload>,
+        cancel: CancellationToken,
+    ) -> Result<()> {
+        if request.account.provider != PROVIDER_ID
+            || request.session.provider != PROVIDER_ID
+            || request.session.account_profile_id != request.account.id
+        {
+            return Err(CoreError::Invalid(
+                "Аккаунт не относится к провайдеру".into(),
+            ));
+        }
+        let server = self.server(&request.account).await?;
+        let operation = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(()),
+            operation = server.operation.lock() => operation,
+        };
+        // Full access runs without the Windows sandbox, so its setup is not required.
+        if request.session.permission_profile != "full_access" {
+            sandbox::ensure_ready(&server).await?;
+        }
+        let mut incoming = server.peer.subscribe();
+        let thread = self.open_thread(&server, &request, &events).await?;
+        if let Ok(mut active) = server.active.lock() {
+            if !active.insert(thread.clone()) {
+                return Err(CoreError::Busy);
+            }
+        }
+        drop(operation);
+        let result = self
+            .drive_turn(&server, &request, &thread, &events, &mut incoming, &cancel)
+            .await;
+        if let Ok(mut active) = server.active.lock() {
+            active.remove(&thread);
+        }
+        self.expire_approvals(&request.session.id).await;
+        result
+    }
+
     pub fn new(account_events: broadcast::Sender<AccountEvent>) -> Self {
         Self {
+            computer: None,
             detection: RwLock::new(Detection::default()),
             servers: tokio::sync::Mutex::new(HashMap::new()),
             approvals: Arc::default(),
@@ -122,6 +187,11 @@ impl CodexProvider {
             auth_locks: Mutex::default(),
             logins: Mutex::default(),
         }
+    }
+
+    pub fn with_computer(mut self, manager: Arc<smart_computer::manager::Manager>) -> Self {
+        self.computer = Some(manager);
+        self
     }
 
     fn profile(account: &AccountProfile) -> Result<PathBuf> {
@@ -351,6 +421,7 @@ impl CodexProvider {
             active: Mutex::default(),
             token_expires_at: credentials.and_then(|c| c.expires_at),
             loaded: Mutex::default(),
+            usage_totals: Mutex::default(),
             stderr: tail,
         });
         self.route(account.id.clone(), Arc::clone(&server));
@@ -398,6 +469,20 @@ impl CodexProvider {
                 };
                 match message {
                     Incoming::Notification { method, params } => {
+                        if method == "thread/tokenUsage/updated" {
+                            if let (Some(thread), Some(total)) = (
+                                str_at(&params, "threadId"),
+                                usage::Totals::read(&params["tokenUsage"]["total"]),
+                            ) {
+                                if let Ok(mut totals) = server.usage_totals.lock() {
+                                    // Restore only missing baselines; active turns write their own
+                                    // latest counters, so a delayed replay cannot overwrite them.
+                                    if totals.len() < 1000 && thread.len() <= 256 {
+                                        totals.entry(thread.into()).or_insert(total);
+                                    }
+                                }
+                            }
+                        }
                         if let Some(event) = account_notification(&account_id, &method, &params) {
                             let _ = events.send(event);
                         }
@@ -430,13 +515,45 @@ impl CodexProvider {
         let session = &request.session;
         let read_only = session.permission_profile == "read_only";
         let full_access = session.permission_profile == "full_access";
-        let policy: crate::model::ToolPolicy = serde_json::from_str(&session.tool_policy)?;
+        let policy = effective_tools(session)?;
         let extensions = if policy.mcp_servers.is_some() || policy.skills.is_some() {
             Some(self.extensions(&request.account).await?)
         } else {
             None
         };
         let mut config = serde_json::Map::new();
+        let conversation = crate::conversation::ConversationSettings::read(session)?;
+        if let Some(tokens) = conversation.compact_tokens {
+            config.insert("model_auto_compact_token_limit".into(), json!(tokens));
+        }
+        if session.chat_mode != "single" || session.parent_session_id.is_some() {
+            config.insert("agents.enabled".into(), json!(false));
+            config.insert("approvals_reviewer".into(), json!("user"));
+        }
+        // Built-in approval bridge only. Automatic/read-only workers never obtain a lease.
+        let desktop = if let Some(computer) = &self.computer {
+            if !read_only
+                && session.parent_session_id.is_none()
+                && session.chat_mode == "single"
+                && session.role.is_empty()
+            {
+                let pid = server
+                    .child
+                    .lock()
+                    .map_err(|_| CoreError::Busy)?
+                    .as_ref()
+                    .ok_or(CoreError::Busy)?
+                    .id();
+                computer
+                    .config(&request.account.id, &session.id, pid)
+                    .await
+                    .map_err(|e| CoreError::Invalid(e.to_string()))?
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         if let Some(extensions) = &extensions {
             if !extensions.errors.is_empty() {
                 return Err(CoreError::Invalid(
@@ -455,11 +572,20 @@ impl CodexProvider {
                 config.insert("skills.config".into(), json!(extensions.skills.iter().map(|item| json!({"path": std::path::Path::new(&item.id).parent().unwrap_or(std::path::Path::new(&item.id)).to_string_lossy(), "enabled": selected.contains(&item.id) && item.enabled})).collect::<Vec<_>>()));
             }
         }
+        config.insert(
+            "mcp_servers.smart-computer.enabled".into(),
+            json!(desktop.is_some()),
+        );
+        if let Some(desktop) = desktop {
+            for (key, value) in desktop.as_object().ok_or(CoreError::Busy)? {
+                config.insert(format!("mcp_servers.smart-computer.{key}"), value.clone());
+            }
+        }
         let common = json!({
             "cwd": plain_path(&session.working_directory),
             "model": session.model,
             // Full access is chosen explicitly per chat; resume re-applies the current mode.
-            "approvalPolicy": if full_access { "never" } else { "on-request" },
+            "approvalPolicy": approval_policy(&session.permission_profile),
             "sandbox": if read_only {
                 "read-only"
             } else if full_access {
@@ -473,6 +599,7 @@ impl CodexProvider {
             // Resume re-applies thread-local extension overrides, including returning to defaults.
             let mut params = common.clone();
             params["threadId"] = json!(thread);
+            params["excludeTurns"] = json!(true);
             match server
                 .peer
                 .request("thread/resume", params, REQUEST_TIMEOUT)
@@ -516,7 +643,7 @@ impl CodexProvider {
         server: &Arc<AppServer>,
         state: &TurnState,
         session_id: &str,
-        read_only: bool,
+        permission_profile: &str,
         events: &mpsc::Sender<EventPayload>,
         request: ServerRequest,
     ) {
@@ -572,11 +699,11 @@ impl CodexProvider {
                 return;
             }
         };
-        if read_only {
+        if permission_profile == "read_only" || approval_policy(permission_profile) == "never" {
             let _ = decline_unhandled(&server.peer, id, &method).await;
             let _ = events.send(EventPayload::ToolActivity {
                 label: "Дополнительный доступ отклонён".into(),
-                detail: "В режиме «Только чтение» выход из песочницы и разрешение записи недоступны. Измените доступ агента перед следующим запуском задачи.".into(),
+                detail: "Текущий режим не запрашивает расширение разрешений. Действие отклонено без ожидания подтверждения.".into(),
             }).await;
             return;
         }
@@ -717,6 +844,7 @@ impl AgentProvider for CodexProvider {
                         .collect(),
                     default_reasoning_effort: str_at(model, "defaultReasoningEffort")
                         .map(str::to_string),
+                    fast_mode_available: model_supports_fast(model),
                 });
             }
             cursor = page.get("nextCursor").cloned().unwrap_or(Value::Null);
@@ -1029,36 +1157,69 @@ impl AgentProvider for CodexProvider {
         events: mpsc::Sender<EventPayload>,
         cancel: CancellationToken,
     ) -> Result<()> {
-        if request.account.provider != PROVIDER_ID {
+        let (tx, rx) = mpsc::channel(64);
+        let id = Uuid::new_v4().to_string();
+        let started = std::time::Instant::now();
+        let (result, mut report) = tokio::join!(
+            self.run_observed(request.clone(), tx, cancel.clone()),
+            crate::provider_diagnostics::forward(&request, &id, rx, &events, &cancel)
+        );
+        report.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        report.status = if cancel.is_cancelled() {
+            "stopped"
+        } else if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        }
+        .into();
+        if let Err(CoreError::Provider { kind, .. }) = &result {
+            report.error_kind = kind.clone();
+        }
+        crate::provider_diagnostics::finish(&events, report, &cancel).await;
+        result
+    }
+    async fn fork_session(
+        &self,
+        account: &AccountProfile,
+        session: &Session,
+    ) -> Result<Option<String>> {
+        let Some(thread) = &session.provider_session_id else {
+            return Ok(None);
+        };
+        if account.provider != PROVIDER_ID
+            || session.provider != PROVIDER_ID
+            || session.account_profile_id != account.id
+        {
             return Err(CoreError::Invalid(
-                "Аккаунт не относится к провайдеру".into(),
+                "Нарушена привязка аккаунта Codex".into(),
             ));
         }
-        let server = self.server(&request.account).await?;
-        let operation = tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
-            operation = server.operation.lock() => operation,
-        };
-        // Full access runs without the Windows sandbox, so its setup is not required.
-        if request.session.permission_profile != "full_access" {
-            sandbox::ensure_ready(&server).await?;
+        let server = self.server(account).await?;
+        let _operation = server.operation.lock().await;
+        if server
+            .active
+            .lock()
+            .map_err(|_| CoreError::Busy)?
+            .contains(thread)
+        {
+            return Err(CoreError::Busy);
         }
-        let thread = self.open_thread(&server, &request, &events).await?;
-        let mut incoming = server.peer.subscribe();
-        if let Ok(mut active) = server.active.lock() {
-            if !active.insert(thread.clone()) {
-                return Err(CoreError::Busy);
-            }
-        }
-        drop(operation);
-        let result = self
-            .drive_turn(&server, &request, &thread, &events, &mut incoming, &cancel)
-            .await;
-        if let Ok(mut active) = server.active.lock() {
-            active.remove(&thread);
-        }
-        self.expire_approvals(&request.session.id).await;
-        result
+        let response = server
+            .peer
+            .request(
+                "thread/fork",
+                json!({"threadId":thread,"excludeTurns":true,"ephemeral":false}),
+                REQUEST_TIMEOUT,
+            )
+            .await
+            .map_err(|e| provider_error(e, server.last_error()))?;
+        let id = response
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty() && id.len() < 256 && *id != thread)
+            .ok_or_else(|| CoreError::Invalid("Codex не вернул отдельный ID ветки".into()))?;
+        Ok(Some(id.into()))
     }
 
     async fn resolve_approval(
@@ -1193,16 +1354,31 @@ impl CodexProvider {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let mut state = TurnState::new(thread);
+        state.usage = usage::Tracker::new(
+            request.session.provider_session_id.is_none(),
+            server
+                .usage_totals
+                .lock()
+                .ok()
+                .and_then(|totals| totals.get(thread).copied()),
+        );
+        let selected_model = self
+            .models(&request.account)
+            .await?
+            .into_iter()
+            .find(|model| model.id == request.session.model)
+            .ok_or_else(|| CoreError::Invalid("Модель недоступна".into()))?;
+        if request.session.fast_mode && !selected_model.fast_mode_available {
+            return Err(CoreError::Invalid(
+                "Скоростной режим недоступен для выбранной модели Codex".into(),
+            ));
+        }
         let effort = if let Some(effort) = &request.session.reasoning_effort {
             Some(effort.clone())
         } else {
-            self.models(&request.account)
-                .await?
-                .into_iter()
-                .find(|m| m.id == request.session.model)
-                .and_then(|m| m.default_reasoning_effort)
+            selected_model.default_reasoning_effort
         };
-        let policy: crate::model::ToolPolicy = serde_json::from_str(&request.session.tool_policy)?;
+        let policy = effective_tools(&request.session)?;
         let disabled_plugins = if let Some(selected) = &policy.plugins {
             let extensions = self.extensions(&request.account).await?;
             if !extensions.errors.is_empty() {
@@ -1222,6 +1398,9 @@ impl CodexProvider {
             None
         };
         let full_access = request.session.permission_profile == "full_access";
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
         let sandbox = if request.session.permission_profile == "read_only" {
             json!({"type":"readOnly", "networkAccess":false})
         } else if full_access {
@@ -1232,17 +1411,20 @@ impl CodexProvider {
         let started = server
             .peer
             .request(
-                "turn/start",
-                json!({
+                if request.prompt=="/compact" {"thread/compact/start"} else {"turn/start"},
+                if request.prompt=="/compact" {json!({"threadId":thread})} else {json!({
                     "threadId": thread,
                     "input": std::iter::once(json!({"type":"text", "text":request.prompt})).chain(request.attachments.iter().filter(|file| file.mime.starts_with("image/")).map(|file| json!({"type":"localImage", "path":file.path}))).collect::<Vec<_>>(),
                     "model": request.session.model,
                     "effort": effort,
-                    "approvalPolicy": if full_access { "never" } else { "on-request" },
+                    // Stable CLI schema: a per-turn override cannot leak into another chat.
+                    // An explicit default also clears any inherited Fast preference.
+                    "serviceTierForTurn": if request.session.fast_mode { "fast" } else { "default" },
+                    "approvalPolicy": approval_policy(&request.session.permission_profile),
                     "sandboxPolicy": sandbox,
                     "disabledPluginIds": disabled_plugins,
                     "outputSchema": request.output_schema,
-                }),
+                })},
                 REQUEST_TIMEOUT,
             )
             .await
@@ -1252,12 +1434,17 @@ impl CodexProvider {
             .and_then(Value::as_str)
             .map(str::to_string);
 
+        let mut followups = match &request.live_input {
+            Some(rx) => Some(rx.lock().await),
+            None => None,
+        };
         let closed = server.peer.closed();
         let mut interrupt_deadline: Option<tokio::time::Instant> = None;
         let mut structured_result: Option<String> = None;
         loop {
             let deadline = interrupt_deadline;
             let message = tokio::select! {
+                biased;
                 _ = cancel.cancelled(), if interrupt_deadline.is_none() => {
                     if let Some(turn) = &state.turn_id {
                         let _ = server.peer.request(
@@ -1282,10 +1469,41 @@ impl CodexProvider {
                         kind: None,
                     });
                 }
+                followup = async { match &mut followups { Some(rx) => rx.recv().await, None => std::future::pending().await } }, if interrupt_deadline.is_none() => {
+                    if let Some(followup) = followup {
+                        let result = if let Some(turn) = &state.turn_id {
+                            server.peer.request("turn/steer", json!({"threadId":thread,"expectedTurnId":turn,
+                                "input":std::iter::once(json!({"type":"text","text":followup.prompt})).chain(followup.attachments.iter().filter(|f|f.mime.starts_with("image/")).map(|f|json!({"type":"localImage","path":f.path}))).collect::<Vec<_>>()
+                            }),REQUEST_TIMEOUT).await.map_err(|e|provider_error(e,server.last_error())).and_then(|value| {
+                                if value["turnId"].as_str()==Some(turn.as_str()) { Ok(()) } else { Err(CoreError::Invalid("Codex не подтвердил ID текущего хода; автоматического повтора нет".into())) }
+                            })
+                        } else { Err(CoreError::Busy) };
+                        let _ = followup.acknowledged.send(result);
+                    } else { followups = None; }
+                    continue;
+                }
                 message = incoming.recv() => message,
             };
             match message {
                 Ok(Incoming::Notification { method, params }) => {
+                    if request.prompt == "/compact"
+                        && state.turn_id.is_none()
+                        && method != "turn/started"
+                    {
+                        continue;
+                    }
+                    if method == "thread/tokenUsage/updated"
+                        && state.turn_id.as_deref() == str_at(&params, "turnId")
+                        && state.owns(&params)
+                    {
+                        if let Some(total) = usage::Totals::read(&params["tokenUsage"]["total"]) {
+                            if let Ok(mut totals) = server.usage_totals.lock() {
+                                if totals.len() < 1000 || totals.contains_key(thread) {
+                                    totals.insert(thread.into(), total);
+                                }
+                            }
+                        }
+                    }
                     if request.output_schema.is_some()
                         && state.owns(&params)
                         && method == "item/completed"
@@ -1341,7 +1559,7 @@ impl CodexProvider {
                             server,
                             &state,
                             &request.session.id,
-                            request.session.permission_profile == "read_only",
+                            &request.session.permission_profile,
                             events,
                             ServerRequest { id, method, params },
                         )
@@ -1479,6 +1697,15 @@ fn apply_rate_limits(value: &Value, status: &mut AccountStatus) {
     }
 }
 
+fn model_supports_fast(model: &Value) -> bool {
+    model["serviceTiers"]
+        .as_array()
+        .is_some_and(|tiers| tiers.iter().any(|tier| tier["id"].as_str() == Some("fast")))
+        || model["additionalSpeedTiers"]
+            .as_array()
+            .is_some_and(|tiers| tiers.iter().any(|tier| tier.as_str() == Some("fast")))
+}
+
 fn provider_error(error: RpcError, detail: Option<String>) -> CoreError {
     let message = match error {
         RpcError::Server { message, .. } => format!("Codex: {}", redact(&message)),
@@ -1562,6 +1789,322 @@ fn version(binary: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn rpc_resumes_the_same_thread_uses_current_input_and_reports_only_this_turn_usage() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let temp = crate::test_support::TestDirectory::new().unwrap();
+        let core = crate::Core::open_with_providers(
+            &temp.path().join("test.db"),
+            vec![Arc::new(crate::provider::MockProvider)],
+        )
+        .await
+        .unwrap();
+        let workspace = core
+            .add_workspace(temp.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let mut session = core
+            .create_session(CreateSession {
+                workspace_id: workspace.id,
+                provider: "mock".into(),
+                account_profile_id: "mock-local".into(),
+                model: "mock-stream-v1".into(),
+                permission_profile: "standard".into(),
+            })
+            .await
+            .unwrap();
+        session.provider = "openai".into();
+        session.chat_mode = "team".into();
+        session.model = "test-model".into();
+        session.fast_mode = true;
+        let mut account = core.account("mock-local").await.unwrap();
+        account.provider = "openai".into();
+        account.config_dir = Some(temp.path().to_string_lossy().into_owned());
+        native_auth::select(&account).unwrap(); // Test-only mode marker; no login or credentials.
+        let (client, transport) = tokio::io::duplex(65536);
+        let (reader, writer) = tokio::io::split(client);
+        let (server_reader, mut server_writer) = tokio::io::split(transport);
+        let peer = RpcPeer::start(reader, writer);
+        let server = Arc::new(AppServer {
+            operation: tokio::sync::Mutex::new(()),
+            sandbox: Mutex::default(),
+            peer: peer.clone(),
+            child: Mutex::default(),
+            group: Mutex::default(),
+            active: Mutex::default(),
+            token_expires_at: None,
+            loaded: Mutex::default(),
+            usage_totals: Mutex::default(),
+            stderr: Arc::default(),
+        });
+        let (account_events, _) = broadcast::channel(8);
+        let provider = CodexProvider::new(account_events);
+        provider
+            .servers
+            .lock()
+            .await
+            .insert(account.id.clone(), server.clone());
+        let closed = peer.closed();
+        let fixture = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            for round in 0..3 {
+                let mut methods = vec![
+                    if round == 0 {
+                        "thread/start"
+                    } else {
+                        "thread/resume"
+                    },
+                    "model/list",
+                    if round == 2 {
+                        "thread/compact/start"
+                    } else {
+                        "turn/start"
+                    },
+                ];
+                if cfg!(windows) {
+                    methods.insert(0, "windowsSandbox/readiness");
+                }
+                for method in methods {
+                    let rpc: Value =
+                        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                    assert_eq!(rpc["method"], method);
+                    let result = if method == "model/list" {
+                        json!({"data":[{"id":"test-model","model":"test-model","displayName":"Test","description":"Fixture only","isDefault":true,"supportedReasoningEfforts":[],"defaultReasoningEffort":null,"serviceTiers":[{"id":"fast"}]}],"nextCursor":null})
+                    } else if method == "turn/start" {
+                        assert_eq!(rpc["params"]["threadId"], "thread-test");
+                        assert_eq!(
+                            rpc["params"]["serviceTierForTurn"],
+                            if round == 0 { "fast" } else { "default" }
+                        );
+                        assert_eq!(
+                            rpc["params"]["input"],
+                            json!([{"type":"text","text":if round == 0 {"First task"} else {"Next message"}}])
+                        );
+                        assert_eq!(
+                            rpc["params"]["approvalPolicy"],
+                            if round == 0 { "on-request" } else { "never" }
+                        );
+                        assert_eq!(rpc["params"]["sandboxPolicy"]["type"], "workspaceWrite");
+                        json!({"turn":{"id":format!("turn-{round}"),"status":"inProgress"}})
+                    } else if method == "thread/compact/start" {
+                        assert_eq!(rpc["params"], json!({"threadId":"thread-test"}));
+                        json!({})
+                    } else if method == "windowsSandbox/readiness" {
+                        json!({"status":"ready"})
+                    } else {
+                        if round == 0 {
+                            assert_eq!(
+                                rpc["params"]["config"]["model_auto_compact_token_limit"],
+                                200000
+                            );
+                        } else {
+                            assert!(rpc["params"]["config"]
+                                .get("model_auto_compact_token_limit")
+                                .is_none());
+                        }
+                        assert_eq!(
+                            rpc["params"]["approvalPolicy"],
+                            if round == 0 { "on-request" } else { "never" }
+                        );
+                        assert_eq!(rpc["params"]["sandbox"], "workspace-write");
+                        assert_eq!(rpc["params"]["config"]["agents.enabled"], false);
+                        assert_eq!(rpc["params"]["config"]["approvals_reviewer"], "user");
+                        if round == 1 {
+                            assert_eq!(rpc["params"]["threadId"], "thread-test");
+                            assert_eq!(rpc["params"]["excludeTurns"], true);
+                        }
+                        json!({"thread":{"id":"thread-test"}})
+                    };
+                    server_writer
+                        .write_all(
+                            format!("{}\n", json!({"id":rpc["id"],"result":result})).as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                    if method == "thread/compact/start" {
+                        for frame in [
+                            json!({"method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"compact-turn"}}}),
+                            json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"compact-turn","item":{"type":"contextCompaction","id":"compact-item"}}}),
+                            json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"compact-turn","item":{"type":"contextCompaction","id":"compact-item"}}}),
+                            json!({"method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"compact-turn","status":"completed"}}}),
+                        ] {
+                            server_writer
+                                .write_all(format!("{frame}\n").as_bytes())
+                                .await
+                                .unwrap();
+                        }
+                    }
+                    if method == "turn/start" {
+                        let steer: Value =
+                            serde_json::from_str(&lines.next_line().await.unwrap().unwrap())
+                                .unwrap();
+                        assert_eq!(steer["method"], "turn/steer");
+                        assert_eq!(steer["params"]["threadId"], "thread-test");
+                        assert_eq!(steer["params"]["expectedTurnId"], format!("turn-{round}"));
+                        assert_eq!(steer["params"]["input"][0]["text"], "Live correction");
+                        assert_eq!(steer["params"]["input"][1]["type"], "localImage");
+                        let response = if round == 0 {
+                            json!({"id":steer["id"],"result":{"turnId":"turn-0"}})
+                        } else {
+                            json!({"id":steer["id"],"error":{"code":-32000,"message":"turn finished"}})
+                        };
+                        server_writer
+                            .write_all(format!("{response}\n").as_bytes())
+                            .await
+                            .unwrap();
+                        if round == 1 {
+                            let stale = json!({"method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-0","status":"completed"}}});
+                            server_writer
+                                .write_all(format!("{stale}\n").as_bytes())
+                                .await
+                                .unwrap();
+                        }
+                        for input in if round == 0 {
+                            vec![10, 30, 30]
+                        } else {
+                            vec![50, 50]
+                        } {
+                            let frame = json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread-test","turnId":format!("turn-{round}"),"tokenUsage":{"total":{"inputTokens":input,"cachedInputTokens":input/2,"outputTokens":input/5,"reasoningOutputTokens":input/10},"last":{"inputTokens":10,"cachedInputTokens":5,"outputTokens":2,"reasoningOutputTokens":1}}}});
+                            server_writer
+                                .write_all(format!("{frame}\n").as_bytes())
+                                .await
+                                .unwrap();
+                        }
+                        let end = json!({"method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":format!("turn-{round}"),"status":"completed"}}});
+                        server_writer
+                            .write_all(format!("{end}\n").as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+            let fork: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(fork["method"], "thread/fork");
+            assert_eq!(
+                fork["params"],
+                json!({"threadId":"thread-test","excludeTurns":true,"ephemeral":false})
+            );
+            server_writer
+                .write_all(
+                    format!(
+                        "{}\n",
+                        json!({"id":fork["id"],"result":{"thread":{"id":"forked-thread"}}})
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            closed.cancelled().await;
+        });
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut request = TurnRequest {
+            session,
+            account,
+            prompt: "First task".into(),
+            attachments: vec![],
+            live_input: None,
+            output_schema: None,
+        };
+        request.session.conversation_settings = r#"{"compact_tokens":200000}"#.into();
+        for expected in [30, 20] {
+            let (followup_tx, followup_rx) = mpsc::channel(1);
+            let (ack, acknowledged) = tokio::sync::oneshot::channel();
+            followup_tx
+                .send(crate::conversation::Followup {
+                    prompt: "Live correction".into(),
+                    attachments: vec![crate::attachments::AttachedFile {
+                        name: "image.png".into(),
+                        mime: "image/png".into(),
+                        path: "C:/fixture/image.png".into(),
+                    }],
+                    acknowledged: ack,
+                })
+                .await
+                .unwrap();
+            request.live_input = Some(Arc::new(tokio::sync::Mutex::new(followup_rx)));
+            provider
+                .run(request.clone(), tx.clone(), CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(acknowledged.await.unwrap().is_ok(), expected == 30);
+            let thread = "thread-test".to_string();
+            let mut reports = 0;
+            let mut count = 0;
+            while let Ok(event) = rx.try_recv() {
+                if let EventPayload::ProviderDiagnostic { report } = &event {
+                    assert_eq!(report.provider, "openai");
+                    assert_eq!(report.input_tokens, Some(expected));
+                    assert!(!report.usage_incomplete);
+                    assert_eq!(report.status, "completed");
+                    reports += 1;
+                }
+                if let EventPayload::ProviderUsage {
+                    input_tokens,
+                    incomplete,
+                    ..
+                } = event
+                {
+                    assert_eq!(input_tokens, Some(expected));
+                    assert!(!incomplete);
+                    count += 1;
+                }
+            }
+            assert_eq!(count, 1);
+            assert_eq!(reports, 1);
+            request.session.provider_session_id = Some(thread);
+            request.session.fast_mode = false;
+            request.session.permission_profile = "workspace_auto".into();
+            request.session.conversation_settings = "{}".into();
+            request.prompt = "Next message".into();
+        }
+        request.prompt = "/compact".into();
+        request.live_input = None;
+        provider
+            .run(request.clone(), tx.clone(), CancellationToken::new())
+            .await
+            .unwrap();
+        let mut compacted = false;
+        while let Ok(event) = rx.try_recv() {
+            compacted |= matches!(event, EventPayload::ContextCompacted {});
+        }
+        assert!(compacted);
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+        provider
+            .run(request.clone(), tx.clone(), stopped)
+            .await
+            .unwrap();
+        let mut invalid = request.clone();
+        invalid.session.account_profile_id = "wrong-profile".into();
+        assert!(provider
+            .run(invalid, tx.clone(), CancellationToken::new())
+            .await
+            .is_err());
+        assert_eq!(
+            provider
+                .fork_session(&request.account, &request.session)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("forked-thread")
+        );
+        peer.close();
+        fixture.await.unwrap();
+    }
+    #[test]
+    fn fast_availability_comes_only_from_reported_catalog_tiers() {
+        assert!(model_supports_fast(
+            &json!({"serviceTiers":[{"id":"fast","name":"Fast","description":""}]})
+        ));
+        assert!(model_supports_fast(
+            &json!({"additionalSpeedTiers":["fast"]})
+        ));
+        assert!(!model_supports_fast(&json!({"model":"gpt-6.1-sol"})));
+        assert!(!model_supports_fast(
+            &json!({"serviceTiers":[{"id":"ultrafast"}]})
+        ));
+    }
 
     #[test]
     fn verbatim_paths_are_plain_for_codex() {

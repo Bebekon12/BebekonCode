@@ -12,6 +12,7 @@ export function ExtensionsDialog({
   configure,
   close,
   prepareInstall,
+  openComputer,
 }: {
   client: ClientTransport;
   data: Snapshot;
@@ -19,6 +20,7 @@ export function ExtensionsDialog({
   configure: (session: Session) => void;
   close: () => void;
   prepareInstall: (accountId: string, skill: string) => Promise<void>;
+  openComputer: () => void;
 }) {
   const [accountId, setAccountId] = useState(
     session?.account_profile_id ??
@@ -142,6 +144,7 @@ export function ExtensionsDialog({
           {tab === 'catalog' ? (
             data.accounts.find((a) => a.id === accountId)?.provider === 'openai' ? (
               <PluginManager
+                openComputer={openComputer}
                 key={accountId}
                 client={client}
                 accountId={accountId}

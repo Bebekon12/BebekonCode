@@ -8,7 +8,7 @@ const license = readFileSync(
 ).replaceAll('*/', '* /');
 
 await build({
-  entryPoints: [resolve(import.meta.dirname, 'claude-usage.mjs')],
+  entryPoints: [resolve(import.meta.dirname, process.argv[3] ?? 'claude-usage.mjs')],
   outfile: process.argv[2],
   bundle: true,
   platform: 'node',

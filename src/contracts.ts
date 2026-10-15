@@ -4,6 +4,11 @@ export interface Workspace {
   root: string;
   created_at: number;
 }
+export interface AttachedFile {
+  name: string;
+  mime: string;
+  path: string;
+}
 export interface Attachment {
   name: string;
   mime: string;
@@ -20,6 +25,7 @@ export interface AccountProfile {
 }
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'stopped' | 'failed' | 'interrupted';
 export interface Session {
+  conversation_settings?: string;
   id: string;
   workspace_id: string;
   provider: string;
@@ -34,6 +40,7 @@ export interface Session {
   created_at: number;
   updated_at: number;
   reasoning_effort: string | null;
+  fast_mode?: boolean;
   tool_policy: string;
   parent_session_id: string | null;
   chat_mode: 'single' | 'team' | 'auto' | 'task';
@@ -50,6 +57,7 @@ export interface AgentConfig {
   account_profile_id: string;
   model: string;
   reasoning_effort: string | null;
+  fast_mode?: boolean;
   permission_profile: string;
   tools: ToolPolicy;
   role: string;
@@ -67,10 +75,40 @@ export interface CreateSession {
   permission_profile: string;
 }
 export type EventPayload =
+  | {
+      type: 'context_usage';
+      used_tokens: number | null;
+      window_tokens: number | null;
+      source: string;
+    }
+  | { type: 'context_compacted' }
+  | { type: 'user_followup'; prompt: string; files: AttachedFile[] }
+  | { type: 'queue_changed' }
+  | { type: 'provider_diagnostic'; report: ProviderRunDiagnostic }
   | { type: 'turn_started'; prompt: string }
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'progress_delta'; text: string }
   | { type: 'model_resolved'; model: string }
+  | { type: 'run_changes'; files: ChangedFile[]; limited: boolean }
+  | {
+      type: 'provider_run_started';
+      provider: string;
+      model: string;
+      purpose: string;
+      resumed: boolean;
+      prompt_bytes: number;
+    }
+  | {
+      type: 'provider_usage';
+      provider: string;
+      model_requests: number | null;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      cache_read_tokens: number | null;
+      cache_creation_tokens: number | null;
+      reasoning_tokens?: number | null;
+      incomplete?: boolean;
+    }
   | { type: 'user_attachments'; files: { name: string; path: string; mime: string }[] }
   | {
       type: 'team_message';
@@ -87,8 +125,20 @@ export type EventPayload =
       model: string;
       account_profile_id: string;
       reasoning_effort: string | null;
+      fast_mode?: boolean;
     }
   | { type: 'tool_activity'; label: string; detail: string }
+  | {
+      type: 'tool_started';
+      id: string;
+      tool: string;
+      kind: ToolKind;
+      summary: string;
+      added?: number | null;
+      removed?: number | null;
+    }
+  | { type: 'tool_finished'; id: string; failed: boolean }
+  | { type: 'todo_update'; replace: boolean; items: TodoItem[] }
   | {
       type: 'approval_requested';
       id: string;
@@ -103,6 +153,41 @@ export type EventPayload =
   | { type: 'turn_completed' | 'session_stopped' }
   | { type: 'provider_error'; message: string; kind?: string | null };
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny';
+export type ToolKind =
+  'command' | 'read' | 'edit' | 'create' | 'write' | 'search' | 'web' | 'agent' | 'mcp' | 'other';
+export interface TodoItem {
+  id?: string | null;
+  content?: string | null;
+  status?: 'pending' | 'in_progress' | 'completed' | 'deleted' | null;
+}
+export interface ProviderRunDiagnostic {
+  request_id: string;
+  provider: string;
+  account_profile_id: string;
+  session_id: string;
+  provider_session_id: string | null;
+  requested_model: string;
+  resolved_model: string | null;
+  effort: string | null;
+  permission_profile: string;
+  fast_mode: boolean;
+  resumed: boolean;
+  prompt_bytes: number;
+  elapsed_ms: number;
+  tool_requests: number;
+  approval_requests: number;
+  reported_retries: number;
+  status: string;
+  error_kind: string | null;
+  usage_reported: boolean;
+  usage_incomplete?: boolean;
+  subagent_events?: number;
+  model_requests: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_creation_tokens: number | null;
+}
 export interface UsageWindow {
   label?: string | null;
   window_minutes: number | null;
@@ -144,6 +229,14 @@ export interface ModelInfo {
   is_default: boolean;
   reasoning_efforts?: string[];
   default_reasoning_effort?: string | null;
+  fast_mode_available?: boolean;
+}
+
+export interface ChangedFile {
+  path: string;
+  status: 'added' | 'deleted' | 'modified';
+  added: number | null;
+  removed: number | null;
 }
 export interface ExtensionItem {
   id?: string;
@@ -234,7 +327,43 @@ export interface UpdateProgress {
   downloaded: number;
   total: number | null;
 }
+export interface ConversationSettings {
+  compact_tokens: number | null;
+  claude_compact_percent: number | null;
+  response_style: 'standard' | 'concise' | 'detailed' | 'visual';
+}
 export interface ClientTransport {
+  configureConversation(sessionId: string, settings: ConversationSettings): Promise<Session>;
+  steerMessage(
+    sessionId: string,
+    expectedRun: string,
+    prompt: string,
+    attachments: Attachment[],
+  ): Promise<void>;
+  enqueueMessage(sessionId: string, prompt: string, attachments: Attachment[]): Promise<string>;
+  editQueuedTask(id: string, prompt: string, direction: number): Promise<void>;
+  taskQueue(): Promise<QueuedTask[]>;
+  enqueueTask(sessionId: string, prompt: string): Promise<string>;
+  changeQueuedTask(id: string, resume: boolean): Promise<void>;
+  checkpoints(sessionId: string): Promise<Checkpoint[]>;
+  createCheckpoint(sessionId: string, label: string): Promise<Checkpoint>;
+  checkpointDiff(sessionId: string, id: string): Promise<CheckpointDiff[]>;
+  restoreCheckpointFile(
+    sessionId: string,
+    id: string,
+    path: string,
+    expected: string,
+  ): Promise<void>;
+  deleteCheckpoint(sessionId: string, id: string): Promise<void>;
+  branchChat(sessionId: string, isolated: boolean): Promise<Session>;
+  projectFileRules(sessionId: string): Promise<FileRule[]>;
+  saveProjectFileRules(sessionId: string, rules: FileRule[]): Promise<void>;
+  computerStatus(): Promise<ComputerStatus>;
+  installUnityAdapter(root: string): Promise<void>;
+  computerWindows(): Promise<ComputerWindow[]>;
+  configureComputer(sessionId: string, windows: string[]): Promise<void>;
+  stopComputer(): Promise<void>;
+  approveComputer(id: string, allow: boolean, sensitive: boolean): Promise<void>;
   accountMcp(accountId: string): Promise<LocalMcpServer[]>;
   saveAccountMcp(accountId: string, servers: LocalMcpServer[]): Promise<void>;
   attachmentImage(sessionId: string, path: string): Promise<string>;
@@ -289,11 +418,80 @@ export interface ClientTransport {
   checkReleases(force: boolean): Promise<ReleaseCheck>;
   openReleases(): Promise<void>;
 }
+export interface QueuedTask {
+  attachments?: string;
+  id: string;
+  session_id: string;
+  prompt: string;
+  state: string;
+  run_id: string | null;
+  error: string | null;
+  created_at: number;
+}
+export interface Checkpoint {
+  id: string;
+  session_id: string;
+  root: string;
+  label: string;
+  created_at: number;
+  file_count: number;
+  limited: boolean;
+}
+export interface CheckpointDiff {
+  path: string;
+  before: string | null;
+  after: string | null;
+  expected: string;
+}
+export interface FileRule {
+  root: string;
+  path: string;
+  tool: string;
+}
 
 export interface LocalMcpServer {
   name: string;
   command: string;
   args: string[];
+}
+
+export interface ComputerWindow {
+  id: string;
+  title: string;
+  application: string;
+  pid: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  dpi: number;
+  focused: boolean;
+}
+export interface ComputerStatus {
+  executing: boolean;
+  available: boolean;
+  enabled: boolean;
+  stopped: boolean;
+  owner_session: string | null;
+  windows: ComputerWindow[];
+  pending: {
+    id: string;
+    account: string;
+    session: string;
+    window: string | null;
+    tool: string;
+    action: string | null;
+    sensitive: boolean;
+    created_ms: number;
+    description: string;
+  } | null;
+  metrics: Record<string, number>;
+  audit: {
+    at_ms: number;
+    tool: string;
+    action: string | null;
+    execution: string;
+    verification: string;
+    latency_ms: number;
+  }[];
+  detail: string;
 }
 
 export interface FileEntry {

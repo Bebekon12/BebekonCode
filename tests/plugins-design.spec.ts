@@ -50,18 +50,17 @@ test('plugins install and remove in the selected account; desktop use stays unav
   });
 });
 
-test('composer help is on demand and settings remain usable with keyboard and small windows', async ({
+test('composer stays compact and settings remain usable with keyboard and small windows', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 960, height: 640 });
   await page.goto('/?preview=1');
   await page.locator('.new-session-button').click();
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
-  await expect(page.locator('.composer-help-panel')).toBeHidden();
-  await page.getByLabel('О вложениях и контексте').click();
-  await expect(page.locator('.composer-help-panel')).toContainText('DOCX');
-  await page.getByLabel('О вложениях и контексте').click();
-  await expect(page.locator('.composer-help-panel')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Прикрепить файлы' })).toHaveAttribute(
+    'title',
+    /перетащить/,
+  );
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await expect(page.getByLabel('Проверять обновления при запуске')).toHaveRole('switch');
   await page.getByLabel('Тема оформления').selectOption('light');

@@ -19,6 +19,7 @@ export function AgentPicker({
   change,
   lockedAccount = false,
   worker = false,
+  participant = false,
   initialToolsOpen = false,
 }: {
   client: ClientTransport;
@@ -27,6 +28,7 @@ export function AgentPicker({
   change: (value: AgentConfig) => void;
   lockedAccount?: boolean;
   worker?: boolean;
+  participant?: boolean;
   initialToolsOpen?: boolean;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -35,6 +37,7 @@ export function AgentPicker({
   const [toolsOpen, setToolsOpen] = useState(initialToolsOpen);
   const [extensions, setExtensions] = useState<Extensions>();
   const [toolsError, setToolsError] = useState('');
+  const [confirmFull, setConfirmFull] = useState(false);
   const current = useRef({ value, change });
   current.current = { value, change };
   useEffect(() => {
@@ -59,6 +62,7 @@ export function AgentPicker({
         patch({
           ...latest,
           model: model?.id ?? '',
+          fast_mode: !!latest.fast_mode && !!model?.fast_mode_available,
           reasoning_effort: model?.reasoning_efforts?.includes(latest.reasoning_effort ?? '')
             ? latest.reasoning_effort
             : null,
@@ -85,25 +89,13 @@ export function AgentPicker({
   }, [client, toolsOpen, value.account_profile_id]);
   const model = models.find((item) => item.id === value.model);
   const accounts = data.accounts.filter((a) => a.provider === value.provider);
+  const toolsLocked = participant && ['read_only', 'plan'].includes(value.permission_profile);
   const selected = (kind: keyof ToolPolicy, id: string) =>
     value.tools[kind]?.includes(id) ?? !(value.provider === 'anthropic' && kind === 'mcp_servers');
   return (
     <div className="agent-picker">
       {value.provider === 'mock' && (
-        <p className="small muted">
-          Демонстрационный режим: без запросов к ИИ и работы с файлами. Для ответов ИИ подключите
-          аккаунт.
-        </p>
-      )}
-      {value.provider === 'anthropic' && (
-        <details className="small muted">
-          <summary>Возможности Claude в Windows</summary>
-          <p>
-            Модель и доступ проверяет Anthropic. Доступны файлы проекта и инструкции выбранных
-            навыков аккаунта. Команды shell и локальный MCP требуют отдельного подтверждения:
-            песочницы ОС Windows нет. Встроенный Skill, плагины и полный доступ Claude недоступны.
-          </p>
-        </details>
+        <p className="small muted">Демо-режим: подключите аккаунт для ответов ИИ.</p>
       )}
       {!lockedAccount && (
         <div className="field-grid">
@@ -124,12 +116,14 @@ export function AgentPicker({
                   account_profile_id: account?.id ?? '',
                   model: '',
                   reasoning_effort: null,
+                  fast_mode: false,
                   tools: {},
                   // Full access exists only for some providers; never carry it over silently.
-                  permission_profile:
-                    value.permission_profile === 'full_access'
-                      ? 'standard'
-                      : value.permission_profile,
+                  permission_profile: ['full_access', 'plan', 'claude_auto'].includes(
+                    value.permission_profile,
+                  )
+                    ? 'standard'
+                    : value.permission_profile,
                 });
               }}
             >
@@ -150,6 +144,7 @@ export function AgentPicker({
                 change({
                   ...value,
                   account_profile_id: e.target.value,
+                  fast_mode: false,
                   model: '',
                   reasoning_effort: null,
                   tools: {},
@@ -174,7 +169,16 @@ export function AgentPicker({
             aria-label="Модель"
             value={value.model}
             disabled={loading || !models.length}
-            onChange={(e) => change({ ...value, model: e.target.value, reasoning_effort: null })}
+            onChange={(e) =>
+              change({
+                ...value,
+                model: e.target.value,
+                reasoning_effort: null,
+                fast_mode:
+                  !!value.fast_mode &&
+                  !!models.find((item) => item.id === e.target.value)?.fast_mode_available,
+              })
+            }
           >
             {loading && <option value={value.model}>Загрузка моделей…</option>}
             {models.map((m) => (
@@ -186,6 +190,9 @@ export function AgentPicker({
         </label>
         <ReasoningSlider
           model={model}
+          provider={value.provider}
+          fastMode={value.fast_mode ?? false}
+          changeFastMode={worker ? undefined : (fast_mode) => change({ ...value, fast_mode })}
           value={value.reasoning_effort}
           change={(reasoning_effort) => change({ ...value, reasoning_effort })}
         />
@@ -201,15 +208,58 @@ export function AgentPicker({
           <select
             aria-label="Доступ"
             value={value.permission_profile}
-            onChange={(e) => change({ ...value, permission_profile: e.target.value })}
+            onChange={(e) =>
+              e.target.value === 'full_access' && value.permission_profile !== 'full_access'
+                ? setConfirmFull(true)
+                : change({ ...value, permission_profile: e.target.value })
+            }
           >
             <option value="standard">По правилам провайдера</option>
             <option value="workspace_auto">Авто в проекте</option>
             <option value="read_only">Только чтение</option>
-            <option value="full_access" disabled={!fullAccessProviders.includes(value.provider)}>
-              Полный доступ{fullAccessProviders.includes(value.provider) ? '' : ' — только Codex'}
+            {value.provider === 'anthropic' && (
+              <>
+                <option value="plan">Plan · Claude</option>
+                <option value="claude_auto">Auto · Claude (если поддерживается)</option>
+              </>
+            )}
+            <option
+              value="full_access"
+              disabled={worker || !fullAccessProviders.includes(value.provider)}
+            >
+              Полный доступ
+              {worker
+                ? ' — только в обычной команде'
+                : fullAccessProviders.includes(value.provider)
+                  ? ''
+                  : ' — недоступен'}
             </option>
           </select>
+          {confirmFull && (
+            <div role="alertdialog" aria-label="Подтвердить полный доступ">
+              <p>{fullAccessWarning}</p>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setConfirmFull(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  change({ ...value, permission_profile: 'full_access' });
+                  setConfirmFull(false);
+                }}
+              >
+                Включить полный доступ
+              </button>
+            </div>
+          )}
+          {['read_only', 'plan'].includes(value.permission_profile) && (
+            <small className="muted">Внешние инструменты отключены.</small>
+          )}
           {value.permission_profile === 'full_access' ? (
             <small className="full-access-note" role="alert">
               {fullAccessWarning}
@@ -217,10 +267,10 @@ export function AgentPicker({
           ) : (
             <small className="muted">
               {value.permission_profile === 'workspace_auto'
-                ? 'Правки файлов проекта без повторных вопросов. Запросы дополнительных разрешений остаются видимыми.'
+                ? 'Правки и команды в проекте без вопросов.'
                 : worker
-                  ? 'Участники с правом записи работают по очереди, чтобы не перезаписывать изменения друг друга.'
-                  : 'Доступ ограничен выбранным проектом.'}
+                  ? 'Полный доступ для автоучастников недоступен.'
+                  : 'Только выбранный проект.'}
             </small>
           )}
         </label>
@@ -268,7 +318,8 @@ export function AgentPicker({
                     <label className="tool-choice">
                       <input
                         type="checkbox"
-                        checked={value.tools[kind] == null}
+                        disabled={toolsLocked}
+                        checked={!toolsLocked && value.tools[kind] == null}
                         onChange={(e) =>
                           change({
                             ...value,
@@ -287,8 +338,8 @@ export function AgentPicker({
                   >
                     <input
                       type="checkbox"
-                      disabled={!item.enabled || !item.id}
-                      checked={item.enabled && selected(kind, item.id ?? '')}
+                      disabled={toolsLocked || !item.enabled || !item.id}
+                      checked={!toolsLocked && item.enabled && selected(kind, item.id ?? '')}
                       onChange={(e) => {
                         const ids =
                           value.tools[kind] ??

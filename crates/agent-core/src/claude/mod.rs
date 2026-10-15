@@ -1,9 +1,12 @@
 //! Unmodified Claude Code CLI. Authentication is owned by the CLI, never imported.
 mod access;
+use crate::provider_diagnostics as diagnostics;
 mod guard;
 mod mapping;
+pub mod rules;
 #[cfg(test)]
 mod tests;
+mod tools;
 mod usage;
 
 use crate::{
@@ -17,7 +20,7 @@ use async_trait::async_trait;
 pub use guard::hook_entry;
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::OsString,
     io::{BufRead, Read, Write},
     path::{Path, PathBuf},
@@ -30,7 +33,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const MIN_VERSION: &str = "2.1.293";
-const MAX_LINE: u64 = 8 * 1024 * 1024;
+// Replayed user messages can contain 6 MiB of images: 8 MiB base64 plus text/envelope.
+const MAX_LINE: u64 = 9 * 1024 * 1024;
 pub const USAGE_URL: &str = "https://claude.ai/settings/usage";
 
 #[derive(Default, Clone)]
@@ -51,7 +55,7 @@ pub struct ClaudeProvider {
     detection: RwLock<Detection>,
     notifications: broadcast::Sender<AccountEvent>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
-    grants: Arc<Mutex<std::collections::HashSet<(String, PathBuf)>>>,
+    grants: guard::Grants,
     running: Mutex<HashMap<String, (String, CancellationToken)>>,
     logins: Mutex<HashMap<String, CancellationToken>>,
 }
@@ -126,8 +130,30 @@ impl ClaudeProvider {
         }
         // Only documented public status fields; never inspect credential files.
         let signed_in = success && value.get("loggedIn").and_then(Value::as_bool) == Some(true);
-        Ok(AccountStatus { account_id: account.id.clone(), state: if signed_in { "signed_in" } else { "signed_out" }.into(), email: value.get("email").and_then(Value::as_str).map(str::to_string), plan: value.get("subscriptionType").and_then(Value::as_str).map(str::to_string), manage_usage_url: Some(USAGE_URL.into()), message: Some("Авторизация хранится только официальным CLI в отдельном профиле. Навыки доступны; shell и MCP без песочницы Windows требуют подтверждения каждого вызова. Плагины и полный доступ Claude недоступны.".into()), checked_at: now(), ..AccountStatus::default() })
+        Ok(AccountStatus {
+            account_id: account.id.clone(),
+            state: if signed_in { "signed_in" } else { "signed_out" }.into(),
+            email: value
+                .get("email")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            plan: value
+                .get("subscriptionType")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            manage_usage_url: Some(USAGE_URL.into()),
+            message: None,
+            checked_at: now(),
+            ..AccountStatus::default()
+        })
     }
+}
+
+fn supports_fast_mode(model: &str) -> bool {
+    matches!(
+        model,
+        "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8"
+    )
 }
 
 fn version_supported(version: Option<&str>) -> bool {
@@ -214,6 +240,63 @@ async fn capture(mut command: Command, deadline: Duration) -> Result<(bool, Vec<
 
 #[async_trait]
 impl AgentProvider for ClaudeProvider {
+    async fn fork_session(
+        &self,
+        account: &AccountProfile,
+        session: &Session,
+    ) -> Result<Option<String>> {
+        let Some(id) = &session.provider_session_id else {
+            return Ok(None);
+        };
+        if session.provider != "anthropic" || account.id != session.account_profile_id {
+            return Err(CoreError::ProviderUnavailable);
+        }
+        Uuid::parse_str(id).map_err(|_| CoreError::NotFound)?;
+        let node = which::which("node")
+            .map_err(|_| failure("Для ветки Claude требуется Node.js 18+", None))?;
+        let directory = std::env::temp_dir().join(format!("bebekon-session-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory)?;
+        let file = directory.join("session.mjs");
+        std::fs::write(
+            &file,
+            include_str!(concat!(env!("OUT_DIR"), "/claude-session.mjs")),
+        )?;
+        let profile = account
+            .config_dir
+            .as_deref()
+            .ok_or(CoreError::ProviderUnavailable)?;
+        let mut command = Command::new(node);
+        command
+            .arg(&file)
+            .arg(id)
+            .arg(&session.working_directory)
+            .current_dir(&session.working_directory);
+        process::harden(
+            &mut command,
+            process::child_env(&[
+                ("CLAUDE_CONFIG_DIR", OsString::from(profile)),
+                ("DISABLE_TELEMETRY", OsString::from("1")),
+                ("DISABLE_ERROR_REPORTING", OsString::from("1")),
+            ]),
+        );
+        let result = capture(command, Duration::from_secs(20)).await;
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir(directory);
+        let (ok, bytes) = result?;
+        if !ok {
+            return Err(failure(
+                "Официальный SDK не создал ветку сессии Claude",
+                None,
+            ));
+        }
+        let value: Value = serde_json::from_slice(&bytes)?;
+        let fork = value["session_id"].as_str().ok_or(CoreError::NotFound)?;
+        Uuid::parse_str(fork).map_err(|_| CoreError::NotFound)?;
+        if fork == id {
+            return Err(failure("Ветка должна иметь отдельный ID", None));
+        }
+        Ok(Some(fork.into()))
+    }
     fn info(&self) -> ProviderInfo {
         let d = self.detection();
         let available =
@@ -224,9 +307,9 @@ impl AgentProvider for ClaudeProvider {
             available,
             detected_path: d.binary.map(|p| p.to_string_lossy().into_owned()),
             detail: if available {
-                format!("Claude Code {}. Отдельный вход через Anthropic. Файлы проекта и навыки; shell и локальный MCP с подтверждением каждого вызова. Без песочницы ОС Windows. Плагины и полный доступ недоступны.", d.version.unwrap_or_default())
+                format!("Claude Code {}", d.version.unwrap_or_default())
             } else {
-                format!("Нужен официальный нативный Claude Code {MIN_VERSION}+ для Windows. Выполните claude update и нажмите «Обновить».")
+                format!("Нужен Claude Code {MIN_VERSION}+: выполните claude update")
             },
             models: vec!["sonnet".into(), "opus".into(), "haiku".into()],
         }
@@ -292,6 +375,7 @@ impl AgentProvider for ClaudeProvider {
             ("sonnet", "Claude Sonnet · авто"),
             ("opus", "Claude Opus · авто"),
             ("haiku", "Claude Haiku · авто"),
+            ("claude-fable-5-1[1m]", "Claude Fable 5.1"),
             ("claude-opus-5-5", "Claude Opus 5.5"),
             ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
             ("claude-haiku-5-5", "Claude Haiku 5.5"),
@@ -308,9 +392,9 @@ impl AgentProvider for ClaudeProvider {
             id: id.into(),
             name: name.into(),
             description: if ["sonnet", "opus", "haiku"].contains(&id) {
-                "Псевдоним CLI: точная версия появится в ответе."
+                "Последняя версия"
             } else {
-                "Фиксированная версия. Доступность проверяет Anthropic при запросе."
+                ""
             }
             .into(),
             is_default: id == "sonnet",
@@ -326,6 +410,7 @@ impl AgentProvider for ClaudeProvider {
                     .to_vec()
             },
             default_reasoning_effort: None,
+            fast_mode_available: supports_fast_mode(id),
         })
         .collect())
     }
@@ -397,8 +482,13 @@ impl AgentProvider for ClaudeProvider {
             ));
         }
         access::Access::for_request(&request)?;
-        // Claude keeps its guarded modes; full access is validated as Codex-only before this.
+        // Automatic and bypass modes are explicit per-chat choices; defaults remain guarded.
         crate::permissions::validate_profile("anthropic", &request.session.permission_profile)?;
+        if request.session.permission_profile == "claude_auto"
+            && request.session.model == "claude-haiku-4-5"
+        {
+            return Err(failure("Auto недоступен для Claude Haiku 4.5", None));
+        }
         if !self.models(&request.account).await?.iter().any(|model| {
             model.id == request.session.model
                 && request
@@ -416,18 +506,50 @@ impl AgentProvider for ClaudeProvider {
             .lock()
             .map_err(|_| CoreError::Busy)?
             .insert(key.clone(), (request.account.id.clone(), cancel.clone()));
-        let result = async {
-            let status = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()), status = self.auth_status(&request.account) => status? };
-            if status.state != "signed_in" {
-                return Err(failure("Войдите в аккаунт Claude в настройках", Some("auth")));
+        let (observed_tx, observed_rx) = mpsc::channel(64);
+        let operation = async {
+            let result = async {
+                let status = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Ok(()),
+                    status = self.auth_status(&request.account) => status?,
+                };
+                if status.state != "signed_in" {
+                    return Err(failure(
+                        "Войдите в аккаунт Claude в настройках",
+                        Some("auth"),
+                    ));
+                }
+                self.drive(&request, observed_tx.clone(), cancel.clone())
+                    .await
             }
-            self.drive(&request, events.clone(), cancel.clone()).await
-        }.await;
+            .await;
+            guard::expire(&self.pending, &request.session.id, &observed_tx).await;
+            drop(observed_tx);
+            result
+        };
+        let started = std::time::Instant::now();
+        let (result, mut report) = tokio::join!(
+            operation,
+            diagnostics::forward(&request, &key, observed_rx, &events, &cancel)
+        );
+        report.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        report.status = if cancel.is_cancelled() {
+            "stopped"
+        } else if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        }
+        .into();
+        if let Err(CoreError::Provider { kind, .. }) = &result {
+            report.error_kind = kind.clone();
+        }
+        diagnostics::finish(&events, report, &cancel).await;
         self.running
             .lock()
             .map_err(|_| CoreError::Busy)?
             .remove(&key);
-        guard::expire(&self.pending, &request.session.id, &events).await;
         result
     }
     async fn resolve_approval(
@@ -470,9 +592,9 @@ impl AgentProvider for ClaudeProvider {
                 }
             }
         }
-        // Grants are memory-only and are cleared on sign-out.
+        // Signing out one account must not revoke unrelated accounts' file grants.
         if let Ok(mut grants) = self.grants.lock() {
-            grants.clear();
+            grants.retain(|(account_id, _, _)| account_id != &account.id);
         }
     }
     async fn shutdown(&self) {
@@ -507,11 +629,40 @@ impl ClaudeProvider {
             self.grants.clone(),
         )
         .await?;
-        let settings = guard::settings(
+        if request.session.fast_mode && !supports_fast_mode(&request.session.model) {
+            return Err(failure(
+                "Скоростной режим недоступен для выбранной модели Claude",
+                None,
+            ));
+        }
+        // Native subagents (Explore etc.) keep the main context small, as in Claude Desktop.
+        // Team members stay single-agent: the lead already coordinates them.
+        let subagents =
+            request.session.parent_session_id.is_none() && request.session.chat_mode == "single";
+        let mut settings = guard::settings(
             &bridge.pipe,
             &std::env::current_exe()?,
             &request.session.permission_profile,
+            subagents,
         );
+        // Explicit per-session setting: never inherit an account's paid Fast preference.
+        settings["fastMode"] = json!(request.session.fast_mode);
+        let conversation = crate::conversation::ConversationSettings::read(&request.session)?;
+        if let Some(tokens) = conversation.compact_tokens {
+            settings["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = json!(tokens.to_string());
+        }
+        if let Some(percent) = conversation.claude_compact_percent {
+            settings["env"]["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = json!(percent.to_string());
+        }
+        let rules = rules::read(&request.account, &request.session)?;
+        if !rules.is_empty() && request.session.permission_profile == "standard" {
+            settings["permissions"]["allow"] = json!(rules
+                .iter()
+                .map(|r| format!("{}(./{})", r.tool, r.path))
+                .collect::<Vec<_>>());
+            // The hook still asks on every file not explicitly approved by the user.
+            settings["permissions"]["ask"] = json!(["Bash", "PowerShell", "mcp__*"]);
+        }
         let mut command = self.command(Some(&request.account))?;
         command.current_dir(&root).args([
             "--print",
@@ -521,13 +672,20 @@ impl ClaudeProvider {
             "--include-partial-messages",
             "--input-format",
             "stream-json",
-            "--restricted",
+        ]);
+        let live = request.live_input.is_some()
+            && request.prompt != "/compact"
+            && request.output_schema.is_none();
+        if live {
+            command.arg("--replay-user-messages");
+        }
+        let mode = guard::permission_mode(&request.session.permission_profile);
+        if mode != "bypassPermissions" {
+            command.arg("--restricted");
+        }
+        command.args([
             "--permission-mode",
-            if request.session.permission_profile == "workspace_auto" {
-                "acceptEdits"
-            } else {
-                "default"
-            },
+            mode,
             "--setting-sources",
             "",
             "--strict-mcp-config",
@@ -535,22 +693,40 @@ impl ClaudeProvider {
             &access.mcp_config().to_string(),
             "--tools",
         ]);
-        command.arg(if request.session.permission_profile == "read_only" {
-            "Read,Glob,Grep"
+        command.arg(if request.prompt == "/compact" {
+            ""
+        } else if matches!(
+            request.session.permission_profile.as_str(),
+            "read_only" | "plan"
+        ) {
+            "Read,Glob,Grep,TodoWrite,TaskCreate,TaskUpdate,TaskList,TaskGet"
         } else {
-            "Read,Glob,Grep,Edit,Write,Bash,PowerShell"
+            "Read,Glob,Grep,Edit,Write,Bash,PowerShell,TodoWrite,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,ToolSearch,Agent,Monitor,WebSearch,WebFetch"
         });
-        command.arg("--disable-slash-commands");
+        if request.prompt != "/compact" {
+            command.arg("--disable-slash-commands");
+        }
         if access.mcp.is_empty() {
             command.args(["--disallowedTools", "mcp__*"]);
         }
-        for directory in access.skills.values() {
-            command.arg("--add-dir").arg(directory);
+        match access.skills_root() {
+            Some(root) => {
+                command.arg("--add-dir").arg(root);
+            }
+            None => {
+                for directory in access.skills.values() {
+                    command.arg("--add-dir").arg(directory);
+                }
+            }
         }
         if !access.skills.is_empty() {
             command.args(["--append-system-prompt", &access.guidance()]);
         }
-        command.env("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1");
+        // CLI scrub forces default mode in supported native builds; child_env already
+        // strips credentials. Do not silently override a requested automatic mode.
+        if mode == "default" {
+            command.env("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1");
+        }
         command.args([
             "--model",
             &request.session.model,
@@ -579,40 +755,58 @@ impl ClaudeProvider {
         let mut owned = OwnedChild::spawn(&mut command)?;
         let stdout = owned.child.stdout.take().ok_or(CoreError::Busy)?;
         let stdin = owned.child.stdin.take().ok_or(CoreError::Busy)?;
-        let mut content = vec![json!({"type":"text", "text": request.prompt})];
-        for file in request
-            .attachments
-            .iter()
-            .filter(|file| file.mime.starts_with("image/"))
-        {
-            use base64::Engine;
-            let bytes = std::fs::read(crate::files::resolve(
-                &root,
-                Path::new(&file.path)
-                    .strip_prefix(&root)
-                    .or_else(|_| {
-                        Path::new(&file.path)
-                            .strip_prefix(root.to_string_lossy().trim_start_matches(r"\\?\"))
-                    })
-                    .map_err(|_| failure("Вложение за пределами проекта", None))?
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .as_str(),
-                false,
-            )?)?;
-            content.push(json!({"type":"image","source":{"type":"base64","media_type":file.mime,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}}));
-        }
-        let prompt = format!(
-            "{}\n",
-            json!({"type":"user","message":{"role":"user","content":content}})
-        );
+        let prompt = input_line(
+            &request.session,
+            &request.prompt,
+            &request.attachments,
+            None,
+        )?;
+        let (tx, mut lines) = mpsc::channel::<Result<Value>>(64);
+        let (input_sender, mut input_receiver) = mpsc::channel::<String>(2);
+        let write_errors = tx.clone();
         std::thread::Builder::new()
             .name("claude-prompt".into())
             .spawn(move || {
                 let mut stdin = stdin;
-                let _ = stdin.write_all(prompt.as_bytes());
+                while let Some(line) = input_receiver.blocking_recv() {
+                    if stdin
+                        .write_all(line.as_bytes())
+                        .and_then(|_| stdin.flush())
+                        .is_err()
+                    {
+                        let _ = write_errors.blocking_send(Err(failure(
+                            "Не удалось передать сообщение Claude CLI; автоматического повтора нет",
+                            None,
+                        )));
+                        break;
+                    }
+                }
             })?;
-        let (tx, mut lines) = mpsc::channel::<Result<Value>>(64);
+        input_sender
+            .send(prompt)
+            .await
+            .map_err(|_| CoreError::Busy)?;
+        let mut input_sender = if live {
+            Some(input_sender)
+        } else {
+            drop(input_sender);
+            None
+        };
+        let mut followups = if live {
+            Some(
+                request
+                    .live_input
+                    .as_ref()
+                    .ok_or(CoreError::Busy)?
+                    .lock()
+                    .await,
+            )
+        } else {
+            None
+        };
+        let mut pending: HashMap<String, oneshot::Sender<Result<()>>> = HashMap::new();
+        let mut seen_results = HashSet::new();
+        let mut last_result = false;
         std::thread::Builder::new()
             .name("claude-stream".into())
             .spawn(move || {
@@ -624,7 +818,10 @@ impl ClaudeProvider {
                         .take(MAX_LINE + 1)
                         .read_until(b'\n', &mut line)
                     {
-                        Ok(0) => break,
+                        Ok(0) => {
+                            let _ = tx.blocking_send(Ok(Value::Null));
+                            break;
+                        }
                         Ok(_) if line.len() as u64 <= MAX_LINE => {}
                         _ => {
                             let _ = tx
@@ -639,15 +836,99 @@ impl ClaudeProvider {
                     }
                 }
             })?;
-        let mut state = mapping::StreamState::new(request.output_schema.is_some());
-        let deadline = tokio::time::sleep(Duration::from_secs(3600));
-        tokio::pin!(deadline);
+        let mut state = mapping::StreamState::new(request.output_schema.is_some()).with_root(&root);
+        let mut usage_emitted = false;
         loop {
-            let next = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()), _ = &mut deadline => return Err(failure("Claude превысил время выполнения запроса", None)), next = lines.recv() => next };
+            let next = tokio::select! {
+                biased;
+                _=cancel.cancelled()=>return Ok(()),
+                next=lines.recv()=>next,
+                followup=async { match &mut followups {Some(rx)=>rx.recv().await,None=>std::future::pending().await} }, if input_sender.is_some()=>{
+                    if let Some(followup)=followup {
+                        if pending.len()>=32 {let _=followup.acknowledged.send(Err(failure("Claude ещё не подтвердил предыдущие уточнения",None)));continue;}
+                        let id=Uuid::new_v4().to_string();
+                        let line=match input_line(&request.session,&followup.prompt,&followup.attachments,Some(&id)) {
+                            Ok(line)=>line,Err(error)=>{let _=followup.acknowledged.send(Err(error));continue;}
+                        };
+                        let sender=input_sender.as_ref().ok_or(CoreError::Busy)?;
+                        let sent=tokio::select! {biased;_=cancel.cancelled()=>return Ok(()),sent=sender.send(line)=>sent};
+                        if sent.is_err() {let _=followup.acknowledged.send(Err(failure("Поток ввода Claude закрыт",None)));continue;}
+                        pending.insert(id,followup.acknowledged);
+                    } else {followups=None;}
+                    continue;
+                }
+            };
             let Some(next) = next else { break };
-            for payload in state.accept(next?)? {
-                tokio::select! { _ = cancel.cancelled() => return Ok(()), sent = events.send(payload) => { if sent.is_err() { return Ok(()); } } }
+            let value = next?;
+            if value.is_null() {
+                break;
             }
+            let main = value.get("parent_tool_use_id").is_none_or(Value::is_null);
+            if main && value["type"] == "user" {
+                if let Some(id) = value["uuid"].as_str() {
+                    if let Some(ack) = pending.remove(id) {
+                        let _ = ack.send(Ok(()));
+                    }
+                }
+            }
+            let result = main && value["type"] == "result";
+            if result {
+                if let Some(id) = value["uuid"].as_str() {
+                    if !seen_results.insert(id.to_string()) {
+                        continue;
+                    }
+                    if seen_results.len() > 128 {
+                        return Err(failure("Слишком много итогов Claude в одном запуске", None));
+                    }
+                }
+            }
+            if live
+                && main
+                && last_result
+                && matches!(
+                    value["type"].as_str(),
+                    Some("assistant" | "stream_event" | "result")
+                )
+            {
+                state = mapping::StreamState::new(false).with_root(&root);
+                usage_emitted = false;
+                last_result = false;
+                let _ = events
+                    .send(EventPayload::AssistantTextDelta {
+                        text: "\n\n".into(),
+                    })
+                    .await;
+            }
+            if !usage_emitted {
+                if let Some(usage) = mapping::reported_usage(&value) {
+                    usage_emitted = true;
+                    tokio::select! {_=cancel.cancelled()=>return Ok(()),sent=events.send(usage)=>{if sent.is_err(){return Ok(())}}}
+                }
+            }
+            for payload in state.accept(value)? {
+                tokio::select! {_=cancel.cancelled()=>return Ok(()),sent=events.send(payload)=>{if sent.is_err(){return Ok(())}}}
+            }
+            if result {
+                last_result = true;
+                // EOF drains messages already written to the native queue. Close the application
+                // channel now, so a late correction cannot silently become another task.
+                input_sender.take();
+                if let Some(mut receiver) = followups.take() {
+                    receiver.close();
+                    while let Ok(followup) = receiver.try_recv() {
+                        let _ = followup.acknowledged.send(Err(failure(
+                            "Claude уже завершает ответ; уточнение не отправлено",
+                            None,
+                        )));
+                    }
+                }
+            }
+        }
+        if !pending.is_empty() {
+            return Err(failure(
+                "Claude CLI не подтвердил получение части уточнений; автоматического повтора нет",
+                None,
+            ));
         }
         let end = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -669,4 +950,25 @@ impl ClaudeProvider {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
+}
+
+fn input_line(
+    session: &Session,
+    prompt: &str,
+    files: &[crate::attachments::AttachedFile],
+    id: Option<&str>,
+) -> Result<String> {
+    let mut content = vec![json!({"type":"text","text":prompt})];
+    for file in files.iter().filter(|file| file.mime.starts_with("image/")) {
+        let url = crate::attachments::image_data_url(session, file)?;
+        let data = url.split_once(',').ok_or(CoreError::Busy)?.1;
+        content.push(
+            json!({"type":"image","source":{"type":"base64","media_type":file.mime,"data":data}}),
+        );
+    }
+    let mut value = json!({"type":"user","message":{"role":"user","content":content},"parent_tool_use_id":null});
+    if let Some(id) = id {
+        value["uuid"] = json!(id);
+    }
+    Ok(format!("{value}\n"))
 }

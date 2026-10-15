@@ -1,4 +1,31 @@
 /* Compact controls and file/catalog surfaces; shared colors follow the selected theme. */
+.fast-mode-toggle.active,
+.fast-mode-mark {
+  color: var(--info);
+}
+.fast-mode-toggle.active {
+  background: var(--surface-hover);
+}
+.usage-diagnostics {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+}
+.usage-diagnostics summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.usage-diagnostics dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+.usage-diagnostics dd {
+  margin: 0;
+}
 .model-trigger .trigger-effort {
   color: var(--info);
   font-size: var(--font-caption);
@@ -1359,4 +1386,359 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
+}
+
+.chat-history-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-display-modes {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.chat-display-modes button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-display-modes button[aria-pressed='true'] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.chat-display-modes button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chat-activity-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-latest {
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: normal;
+  opacity: 0.7;
+}
+.diagnostic-launches {
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+.diagnostic-launches li {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+.diagnostic-report {
+  margin-top: 8px;
+}
+.diagnostic-report dd {
+  overflow-wrap: anywhere;
+}
+
+.workflow-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.workflow-tabs button[aria-pressed='true'] {
+  background: var(--surface-selected);
+  border-color: var(--accent);
+}
+.workflow-list {
+  list-style: none;
+  padding: 0;
+}
+.workflow-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.workflow-list p {
+  white-space: pre-wrap;
+}
+.checkpoint-file {
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.checkpoint-file summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.checkpoint-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 12px 0;
+}
+.checkpoint-comparison pre {
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12px;
+  padding: 10px;
+  background: var(--surface);
+}
+@media (max-width: 900px) {
+  .checkpoint-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.completion-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px;
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.completion-notice span {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Conversation controls remain available while a model works. */
+.conversation-controls {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+.context-ring-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.context-ring-button:hover,
+.context-ring-button[aria-expanded='true'] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.context-ring-button:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+.context-ring-track {
+  stroke: currentColor;
+  opacity: 0.22;
+}
+.context-ring-value {
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+.context-ring-unknown .context-ring-value {
+  opacity: 0.65;
+}
+.chat-model-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+.composer-agent-entry {
+  position: relative;
+  min-width: 0;
+}
+.composer-agent-entry > .composer-agent {
+  width: 100%;
+  height: 100%;
+}
+.composer-agent-entry.has-context-ring .composer-agent-copy {
+  padding-right: 22px;
+}
+.composer-agent-entry > .conversation-controls {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+}
+.conversation-panel {
+  position: fixed;
+  z-index: 180;
+  width: min(370px, 80vw);
+  max-height: 65vh;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--shadow) 25%, transparent);
+}
+.conversation-panel label {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 6px;
+}
+.conversation-panel select {
+  width: 100%;
+}
+.conversation-panel progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--accent);
+  margin-top: 12px;
+}
+.followup-choice {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.followup-choice select {
+  margin-left: 8px;
+}
+.followup-queue {
+  margin: 0 auto 8px;
+  width: min(100%, 850px);
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+.followup-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--surface);
+}
+.followup-card p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.followup-card textarea {
+  width: 100%;
+  min-height: 60px;
+}
+.followup-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+}
+.followup-actions button {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.answer-link a {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.answer-image {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.answer-image-open {
+  display: block;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  cursor: zoom-in;
+}
+.answer-image img {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.answer-image-caption {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.answer-image-unavailable {
+  display: block;
+  padding: 24px 14px;
+  font-size: 13px;
+}
+.chat-markdown {
+  display: flow-root;
+  line-height: 1.75;
+}
+.chat-markdown > p:has(> .answer-image:only-child) {
+  float: right;
+  clear: right;
+  width: 43%;
+  margin: 5px 0 20px 24px;
+}
+.chat-markdown > h1,
+.chat-markdown > h2,
+.chat-markdown > h3,
+.chat-markdown > .rich-block,
+.chat-markdown > .code-review-block,
+.chat-markdown > .markdown-table {
+  clear: both;
+}
+.chat-markdown > .copy-button {
+  clear: both;
+  display: flex;
+}
+.rich-line-chart svg {
+  width: 100%;
+  max-height: 320px;
+}
+.rich-line-chart details {
+  font-size: 12px;
+}
+.answer-image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: color-mix(in srgb, var(--shadow) 85%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  gap: 16px;
+}
+.answer-image-modal img {
+  max-height: 82vh;
+  width: auto;
+  max-width: 94vw;
+  object-fit: contain;
+}
+@media (max-width: 1000px) {
+  .chat-markdown > p:has(> .answer-image:only-child) {
+    float: none;
+    width: 100%;
+    margin: 16px 0;
+  }
 }

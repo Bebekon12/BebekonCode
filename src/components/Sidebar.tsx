@@ -9,6 +9,7 @@ import {
   Home,
   Info,
   MessageSquare,
+  Monitor,
   Network,
   Plus,
   Puzzle,
@@ -26,7 +27,12 @@ import { usePreference } from '../preferences';
 const chatGroups = [
   { mode: 'single', label: 'Обычные чаты', create: 'Создать обычный чат', icon: MessageSquare },
   { mode: 'team', label: 'Команды агентов', create: 'Создать команду агентов', icon: UsersRound },
-  { mode: 'auto', label: 'Авторазбиение', create: 'Создать чат с авторазбиением', icon: Network },
+  {
+    mode: 'auto',
+    label: 'Автокоманда',
+    create: 'Создать чат с автоматическими ролями',
+    icon: Network,
+  },
 ] as const;
 
 export function Sidebar({
@@ -44,6 +50,7 @@ export function Sidebar({
   search,
   showSettings,
   openPlugins,
+  openComputer,
   selectProject,
   selectSession,
   startSession,
@@ -66,6 +73,7 @@ export function Sidebar({
   search: () => void;
   showSettings: (tab?: string) => void;
   openPlugins: () => void;
+  openComputer: () => void;
   selectProject: (id: string) => void;
   selectSession: (session: Session) => void;
   startSession: (projectId: string) => void;
@@ -262,6 +270,15 @@ export function Sidebar({
         })}
       </div>
       <div className="sidebar-bottom">
+        <button
+          className="sidebar-footer-button"
+          onClick={openComputer}
+          disabled={!data}
+          title="Компьютер"
+        >
+          <Monitor size={18} />
+          <span className="sidebar-label">Компьютер</span>
+        </button>
         <SubscriptionLimits
           accounts={data?.accounts ?? []}
           state={accountState}

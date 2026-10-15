@@ -7,7 +7,9 @@ import path from 'node:path';
 import { chromium, expect } from '@playwright/test';
 
 if (process.platform !== 'win32') throw new Error('Native smoke requires Windows');
-const binary = path.resolve('target/release/bebekoncode-desktop.exe');
+const binary = path.resolve(
+  process.env.BEBEKON_TEST_BINARY || 'target/release/bebekoncode-desktop.exe',
+);
 await fs.access(binary);
 const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'bebekon-native-'));
 const project = path.join(fixture, 'проект с пробелами');
@@ -386,7 +388,15 @@ try {
   const chat = await page.evaluate(
     (agent) =>
       window.__TAURI_INTERNALS__.invoke('create_chat', {
-        input: { workspace_id: null, mode: 'auto', agents: [agent] },
+        input: {
+          workspace_id: null,
+          mode: 'auto',
+          agents: [
+            agent,
+            { ...agent, role: 'Архитектор', permission_profile: 'read_only' },
+            { ...agent, role: 'Рецензент', permission_profile: 'read_only' },
+          ],
+        },
       }),
     agent,
   );
@@ -421,7 +431,9 @@ try {
     (id) =>
       window.__TAURI_INTERNALS__
         .invoke('snapshot')
-        .then((snapshot) => snapshot.sessions.filter((s) => s.parent_session_id === id)),
+        .then((snapshot) =>
+          snapshot.sessions.filter((s) => s.parent_session_id === id && s.chat_mode === 'task'),
+        ),
     chat.id,
   );
   assert.equal(tasks.length, 2);

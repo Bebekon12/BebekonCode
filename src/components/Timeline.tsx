@@ -1,54 +1,33 @@
 import { ChatMarkdown } from './ChatMarkdown';
-import { RunChanges, type ChangeSource } from './RunChanges';
+import { RunChanges } from './RunChanges';
+import { UsageDiagnostics } from './UsageDiagnostics';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ImagePreview } from './ImagePreview';
+import { LiveStatus, TodoCard, ToolGroup } from './TurnParts';
 import { effortLabels } from '../chat';
 import { attachmentHint } from '../attachments';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   Ban,
   Check,
   ShieldQuestion,
   ChevronDown,
-  CircleStop,
   FolderOpen,
   ListChevronsDownUp,
   ListChevronsUpDown,
   ListFilter,
-  LoaderCircle,
-  MessageSquareText,
-  Play,
   Search,
   Sparkles,
   Terminal,
-  UserRound,
   Wrench,
+  X,
 } from 'lucide-react';
 import { buildTimeline, filterTimeline, type TimelineFilter, type TimelineTurn } from '../timeline';
 import type { AgentEvent, ApprovalDecision, Session, SessionStatus } from '../contracts';
 import type { TimelineApproval } from '../timeline';
-import { clock, demoActivity, demoResponse, duration, errorText } from '../locale';
+import { demoActivity, demoResponse, duration, errorText } from '../locale';
 
 type StepState = SessionStatus | 'ready';
-const stepIcons: Record<StepState, typeof Check> = {
-  ready: Play,
-  idle: MessageSquareText,
-  running: LoaderCircle,
-  completed: Check,
-  stopped: CircleStop,
-  failed: AlertTriangle,
-  interrupted: AlertTriangle,
-};
-const pillLabels: Record<StepState, string> = {
-  ready: 'Готово',
-  idle: 'Ожидает',
-  running: 'Выполняется',
-  completed: 'Завершено',
-  stopped: 'Остановлено',
-  failed: 'Ошибка',
-  interrupted: 'Прервано',
-};
 /** Turns mounted at once; earlier ones mount in pages of this size while scrolling up. */
 const renderPage = 40;
 const filters: { id: TimelineFilter; label: string; icon: typeof Check }[] = [
@@ -64,12 +43,10 @@ export function Timeline({
   historyLoading = false,
   openFiles,
   openTerminal,
-  cancel,
   resolveApproval,
   retry,
   chooseAnotherAccount,
   manageUsage,
-  changes,
   loadImage,
 }: {
   events: AgentEvent[];
@@ -79,13 +56,12 @@ export function Timeline({
   historyLoading?: boolean;
   openFiles: () => void;
   openTerminal: () => void;
-  cancel: () => void;
+  /** Stopping lives in the composer; kept for callers. */
+  cancel?: () => void;
   resolveApproval: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
   retry: (prompt: string) => void;
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
-  /** Project change summary under the latest finished answer; absent without a Git project. */
-  changes?: ChangeSource;
   loadImage?: (path: string) => Promise<string>;
 }) {
   const demo = session.provider === 'mock';
@@ -243,17 +219,16 @@ export function Timeline({
     <>
       <div className="chat-history-switch">
         <button
-          className="text-button"
+          className="icon-button history-search-toggle"
           aria-label="Поиск и фильтры истории"
+          title="Поиск по чату"
           aria-expanded={showDetails}
           onClick={() => {
             setShowDetails(!showDetails);
             setFilter('all');
           }}
         >
-          {' '}
-          <Search size={14} /> {showDetails ? 'Скрыть фильтры' : 'История'}{' '}
-          <ChevronDown size={12} />
+          {showDetails ? <X size={15} /> : <Search size={15} />}
         </button>
       </div>
       {showDetails && (
@@ -326,15 +301,8 @@ export function Timeline({
           {overview && !turns.length && (
             <li className="chat-empty">
               <h2>Над чем поработаем?</h2>
-              <p>
-                {team
-                  ? 'Опишите задачу. Команда подготовит один общий ответ; результаты участников доступны в меню команды.'
-                  : 'Опишите задачу или задайте вопрос. Настройки агента — рядом с полем ввода.'}
-              </p>
               {demo && (
-                <p className="small muted">
-                  Сейчас включён локальный симулятор. Для ответов ИИ подключите аккаунт.
-                </p>
+                <p className="small muted">Демо-режим: подключите аккаунт для ответов ИИ.</p>
               )}
             </li>
           )}
@@ -365,54 +333,16 @@ export function Timeline({
               chooseAnotherAccount={chooseAnotherAccount}
               manageUsage={manageUsage}
               last={turn.id === turns[turns.length - 1]?.id}
-              changes={running ? undefined : changes}
+              waiting={waitingApproval}
               viewImage={(file) => void viewImage(file)}
             />
           ))}
-          {overview && (running || interrupted) && (
-            <li className={`step step-tail ${running ? 'live' : ''}`}>
-              <span className="step-marker" aria-hidden="true" />
-              <div className="step-head">
-                <div className="step-title">
-                  <strong>
-                    {running ? (
-                      <ThinkingIndicator
-                        label={
-                          waitingApproval
-                            ? 'Ждёт подтверждения…'
-                            : team
-                              ? 'Команда работает…'
-                              : 'Агент работает…'
-                        }
-                      />
-                    ) : interrupted ? (
-                      'Сессия продолжается…'
-                    ) : (
-                      'Над чем будем работать?'
-                    )}
-                  </strong>
-                  <small>
-                    {running && waitingApproval
-                      ? 'Ожидает вашего решения по запросу выше'
-                      : running
-                        ? team
-                          ? 'Участники выполняют задачу; здесь появится общий итог.'
-                          : 'Ответ появляется в реальном времени'
-                        : interrupted
-                          ? 'Предыдущий запуск прерван при остановке ядра. История сохранена — отправьте новое сообщение, чтобы продолжить.'
-                          : turns.length
-                            ? 'Продолжайте общение с агентом'
-                            : demo
-                              ? 'Отправьте задачу, чтобы попробовать симулятор. Файлы не будут прочитаны или изменены.'
-                              : 'Опишите задачу в поле ниже'}
-                  </small>
-                </div>
-                {running && (
-                  <button className="secondary-button step-stop" onClick={cancel}>
-                    <CircleStop size={13} /> Остановить
-                  </button>
-                )}
-              </div>
+          {overview && interrupted && (
+            <li className="step step-tail">
+              <p className="muted small">
+                Предыдущий запуск прерван. История сохранена — отправьте сообщение, чтобы
+                продолжить.
+              </p>
             </li>
           )}
         </ol>
@@ -446,60 +376,6 @@ export function Timeline({
   );
 }
 
-function Step({
-  state,
-  title,
-  subtitle,
-  time,
-  open = true,
-  toggle,
-  anchor,
-  children,
-}: {
-  state: StepState;
-  title: string;
-  subtitle: string;
-  time: number;
-  open?: boolean;
-  toggle?: () => void;
-  /** Turn id used by the question navigation to find this step. */
-  anchor?: string;
-  children?: ReactNode;
-}) {
-  const Icon = stepIcons[state];
-  return (
-    <li className={`step step-${state}`} data-turn-id={anchor}>
-      <span className="step-marker" aria-hidden="true">
-        <Icon size={15} className={state === 'running' ? 'spin' : undefined} />
-      </span>
-      {children && <div className="step-body">{children}</div>}
-      <div className="step-head">
-        <div className="step-title">
-          <strong title={title}>{title}</strong>
-          <small>{subtitle}</small>
-        </div>
-        <time dateTime={new Date(time * 1000).toISOString()}>{clock(time)}</time>
-        <span className={`step-pill ${state}`}>
-          {(state === 'completed' || state === 'ready') && <Check size={11} />}
-          {pillLabels[state]}
-        </span>
-        {toggle ? (
-          <button
-            className={`icon-button step-toggle ${open ? 'open' : ''}`}
-            aria-expanded={open}
-            aria-label={open ? 'Свернуть этап' : 'Развернуть этап'}
-            onClick={toggle}
-          >
-            <ChevronDown size={15} />
-          </button>
-        ) : (
-          <span className="step-toggle-space" />
-        )}
-      </div>
-    </li>
-  );
-}
-
 type TurnStepProps = Parameters<typeof TurnStepView>[0];
 // Callbacks are recreated on every parent render but act on the same session and turn, so only
 // data props decide whether a step re-renders. Finished turns keep identity (see turnCache).
@@ -516,7 +392,7 @@ const TurnStep = memo(
     a.live === b.live &&
     a.open === b.open &&
     a.last === b.last &&
-    !a.changes === !b.changes &&
+    a.waiting === b.waiting &&
     !a.manageUsage === !b.manageUsage,
 );
 
@@ -536,7 +412,7 @@ function TurnStepView({
   chooseAnotherAccount,
   manageUsage,
   last,
-  changes,
+  waiting,
   viewImage,
 }: {
   turn: TimelineTurn;
@@ -554,182 +430,185 @@ function TurnStepView({
   chooseAnotherAccount: () => void;
   manageUsage?: () => void;
   last: boolean;
-  changes?: ChangeSource;
+  waiting: boolean;
   viewImage: (file: { name: string; path: string }) => void;
 }) {
   const state: StepState = turn.status === 'running' && interrupted ? 'interrupted' : turn.status;
-  const elapsed = turn.finishedAt ? ` · ${duration(turn.finishedAt - turn.startedAt)}` : '';
-  const subtitle: Record<StepState, string> = {
-    ready: '',
-    idle: 'Ожидает',
-    running: team ? 'Команда готовит общий ответ…' : 'Агент отвечает…',
-    completed: `Ответ завершён${elapsed}`,
-    stopped: `Остановлено вами${elapsed}`,
-    failed: `Ошибка провайдера${elapsed}`,
-    interrupted: 'Прервано при остановке ядра',
-  };
+  const running = turn.status === 'running' && live;
+  const showTools = filter !== 'agent';
+  const showText = filter !== 'tools';
+  const configuration = `${providerName} · ${model} · ${turn.reasoningEffort ? (effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort) : 'по умолчанию'}${turn.fastMode ? ' · Fast' : ''}`;
+  // Team turns keep their final answer as one block; single chats interleave text and tools.
+  const parts = team
+    ? turn.parts.filter((part) => part.kind !== 'text')
+    : turn.parts.length
+      ? turn.parts
+      : turn.text
+        ? [{ kind: 'text' as const, text: turn.text }]
+        : [];
+  const lastText = parts.reduce((index, part, i) => (part.kind === 'text' ? i : index), -1);
+  const runningTool = running
+    ? turn.parts
+        .flatMap((part) => (part.kind === 'tools' ? part.items : []))
+        .filter((item) => item.state === 'running')
+        .at(-1)
+    : undefined;
+  const footer =
+    turn.finishedAt && turn.status !== 'running'
+      ? `${state === 'stopped' ? 'Остановлено вами' : state === 'failed' ? 'Ошибка' : 'Ответ завершён'} · ${duration(turn.finishedAt - turn.startedAt)}`
+      : '';
   return (
-    <Step
-      state={state}
-      title={turn.prompt || 'Запрос'}
-      subtitle={subtitle[state]}
-      time={turn.startedAt}
-      open={open}
-      toggle={toggle}
-      anchor={turn.id}
-    >
+    <li className={`turn step step-${state}`} data-turn-id={turn.id}>
       {filter === 'all' && (turn.prompt || turn.attachments.length > 0) && (
-        <div className="step-message">
-          <span className="step-message-avatar">
-            <UserRound size={13} />
-          </span>
-          <div>
-            <div className="entry-label">Вы</div>
-            <div className="prose">{turn.prompt}</div>
-            {turn.attachments.length > 0 && (
-              <div className="sent-attachments">
-                {turn.attachments.map((file) =>
-                  file.mime.startsWith('image/') ? (
-                    <button
-                      className="sent-image-button"
-                      key={file.path}
-                      onClick={() => viewImage(file)}
-                      aria-label={`Посмотреть ${file.name}`}
-                      title="Посмотреть изображение"
-                    >
-                      {file.name}
-                    </button>
-                  ) : (
-                    <span key={file.path} title={`${attachmentHint(file)}\n${file.path}`}>
-                      {file.name}
-                    </span>
-                  ),
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      {open && filter !== 'agent' && turn.activities.length > 0 && (
-        <details
-          className="chat-activity-details"
-          open={filter === 'tools' || (live && turn.status === 'running') ? true : undefined}
-        >
-          <summary>
-            {team ? 'Работа команды' : 'Действия агента'} · {turn.activities.length}
-          </summary>
-          <ul className="activity-table" aria-label="Действия инструментов">
-            {turn.activities.map((activity, index) => (
-              <li key={`${turn.id}-${index}`}>
-                <Wrench size={14} className="activity-icon" />
-                <span className="activity-label">{activity.label}</span>
-                <details className="activity-detail">
-                  <summary>{activity.detail.slice(0, 100)}</summary>
-                  <pre>{activity.detail}</pre>
-                </details>
-                {demo && <span className="demo-label">ДЕМО</span>}
-                <time>{clock(activity.timestamp)}</time>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {open && filter !== 'tools' && (turn.progress.trim() || turn.teamMessages.length > 0) && (
-        <details className="progress-details" open>
-          <summary>
-            <Sparkles size={14} /> {team ? 'Обсуждение команды' : 'Ход работы'}
-          </summary>
-          {turn.progress.trim() && (
-            <div className="progress-copy">
-              <ChatMarkdown text={turn.progress} streaming={live && turn.status === 'running'} />
+        <div className="step-message user-message">
+          <div className="prose">{turn.prompt}</div>
+          {turn.attachments.length > 0 && (
+            <div className="sent-attachments">
+              {turn.attachments.map((file) =>
+                file.mime.startsWith('image/') ? (
+                  <button
+                    className="sent-image-button"
+                    key={file.path}
+                    onClick={() => viewImage(file)}
+                    aria-label={`Посмотреть ${file.name}`}
+                    title="Посмотреть изображение"
+                  >
+                    {file.name}
+                  </button>
+                ) : (
+                  <span key={file.path} title={`${attachmentHint(file)}\n${file.path}`}>
+                    {file.name}
+                  </span>
+                ),
+              )}
             </div>
           )}
-          {turn.teamMessages.map((message) => (
-            <div
-              className="team-transcript-message"
-              key={`${message.sessionId}:${message.stageId}`}
-            >
-              <strong>{message.title}</strong>
-              {message.model && (
-                <small>
-                  {message.model} · Обдумывание:{' '}
-                  {message.reasoningEffort
-                    ? `${effortLabels[message.reasoningEffort] ?? message.reasoningEffort} (запрошено)`
-                    : 'настройка CLI'}
-                </small>
-              )}
-              <ChatMarkdown text={message.text} streaming={live && turn.status === 'running'} />
-            </div>
-          ))}
-        </details>
+          <button
+            className="icon-button turn-toggle"
+            aria-expanded={open}
+            aria-label={open ? 'Свернуть ответ' : 'Развернуть ответ'}
+            title={open ? 'Свернуть ответ' : 'Развернуть ответ'}
+            onClick={toggle}
+          >
+            <ChevronDown size={14} />
+          </button>
+        </div>
       )}
-      {filter !== 'agent' &&
-        turn.approvals.map((approval) => (
+      {filter === 'all' &&
+        turn.followups.map((message, index) => (
+          <div className="step-message user-message followup-message" key={index}>
+            <div className="entry-label">Уточнение</div>
+            <div className="prose">{message.prompt}</div>
+            {message.files.map((file) => (
+              <span className="small" key={file.path}>
+                {file.name}{' '}
+              </span>
+            ))}
+          </div>
+        ))}
+      {open && (
+        <div className="turn-body">
+          {parts.map((part, index) => {
+            if (part.kind === 'tools')
+              return showTools ? (
+                <ToolGroup key={index} items={part.items} expanded={filter === 'tools'} />
+              ) : null;
+            if (part.kind === 'todos')
+              return showTools ? <TodoCard key={index} items={part.items} /> : null;
+            return showText && part.text.trim() ? (
+              <div className="step-message agent" key={index} title={configuration}>
+                <div className="prose">
+                  <ChatMarkdown
+                    text={demo ? demoResponse(part.text) : part.text}
+                    streaming={running && index === parts.length - 1}
+                    copy={index === lastText && !running}
+                  />
+                </div>
+              </div>
+            ) : null;
+          })}
+          {showText && (turn.progress.trim() || turn.teamMessages.length > 0) && (
+            <details className="progress-details">
+              <summary>
+                <Sparkles size={14} /> {team ? 'Обсуждение команды' : 'Ход работы'}
+              </summary>
+              {turn.progress.trim() && (
+                <div className="progress-copy">
+                  <ChatMarkdown text={turn.progress} streaming={running} />
+                </div>
+              )}
+              {turn.teamMessages.map((message) => (
+                <div
+                  className="team-transcript-message"
+                  key={`${message.sessionId}:${message.stageId}`}
+                >
+                  <strong>{message.title}</strong>
+                  {message.model && (
+                    <small>
+                      {message.model}
+                      {message.reasoningEffort
+                        ? ` · ${effortLabels[message.reasoningEffort] ?? message.reasoningEffort}`
+                        : ''}
+                    </small>
+                  )}
+                  <ChatMarkdown text={message.text} streaming={running} />
+                </div>
+              ))}
+            </details>
+          )}
+          {team && showText && turn.text && (
+            <div className="step-message agent" title={configuration}>
+              <div className="entry-label">Ответ команды</div>
+              <div className="prose">
+                <ChatMarkdown text={turn.text} streaming={running} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {turn.approvals
+        .filter((approval) => filter !== 'agent' || !approval.decision)
+        .map((approval) => (
           <ApprovalCard
             key={approval.id}
             approval={approval}
-            actionable={live && turn.status === 'running'}
+            actionable={running}
             resolve={(decision) => resolveApproval(approval.id, decision)}
           />
         ))}
-      {open && team && !turn.text && turn.status === 'running' && live && filter !== 'tools' && (
-        <div className="team-progress" role="status">
-          <ThinkingIndicator
-            label={
-              turn.activities.some((activity) => activity.label === 'Сборка результата')
-                ? 'Собираем общий ответ…'
-                : turn.activities.some((activity) => activity.label === 'Обсуждение в команде')
-                  ? 'Участники проверяют результаты…'
-                  : 'Команда выполняет задачу…'
-            }
-          />
-        </div>
+      {running && last && (
+        <LiveStatus
+          item={runningTool}
+          label={
+            waiting
+              ? 'Ждёт вашего решения'
+              : team
+                ? turn.activities.some((activity) => activity.label === 'Сборка результата')
+                  ? 'Собирает общий ответ…'
+                  : 'Команда работает…'
+                : undefined
+          }
+        />
       )}
-      {open && filter !== 'tools' && (turn.text || (!team && turn.status === 'running')) && (
-        <div className="step-message agent">
-          <span className="step-message-avatar">
-            <Sparkles size={13} />
-          </span>
-          <div>
-            <div
-              className="entry-label"
-              title={`${providerName} · ${model} · ${turn.reasoningEffort ? `${effortLabels[turn.reasoningEffort] ?? turn.reasoningEffort} (запрошено)` : 'Уровень по умолчанию CLI'}`}
-            >
-              {team ? 'Ответ команды' : providerName}
-            </div>
-            <div className="prose">
-              {turn.text ? (
-                <ChatMarkdown text={turn.text} streaming={turn.status === 'running' && live} />
-              ) : (
-                <ThinkingIndicator />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {last && changes && turn.status !== 'running' && filter !== 'tools' && (
-        <RunChanges source={changes} refreshKey={`${turn.id}:${turn.finishedAt ?? ''}`} />
+      {turn.changes && turn.status !== 'running' && filter !== 'tools' && (
+        <RunChanges summary={turn.changes} latest={last} />
       )}
       {turn.error && turn.errorKind === 'usage_limit' ? (
         <div role="alert" className="limit-notice">
-          <strong>Аккаунт достиг текущего лимита провайдера</strong>
+          <strong>Лимит аккаунта исчерпан</strong>
           <p>{turn.error}</p>
-          <p className="muted small">
-            BebekonCode не переключает аккаунты автоматически. Повторите позже или начните новую
-            сессию с другим аккаунтом.
-          </p>
           {last && (
             <div className="limit-actions">
               {manageUsage && (
                 <button className="primary-button" onClick={manageUsage}>
-                  Управлять использованием
+                  Лимиты
                 </button>
               )}
               <button className="secondary-button" onClick={() => retry(turn.prompt)}>
                 Повторить
               </button>
               <button className="secondary-button" onClick={chooseAnotherAccount}>
-                Выбрать другой аккаунт вручную
+                Другой аккаунт
               </button>
             </div>
           )}
@@ -737,19 +616,25 @@ function TurnStepView({
       ) : (
         turn.error && (
           <div role="alert" className="notice error">
-            {turn.error}
+            {demo ? demoActivity(turn.error) : turn.error}
           </div>
         )
       )}
-    </Step>
+      {open && (footer || turn.usage.length > 0 || turn.diagnostics.length > 0) && (
+        <div className="turn-footer">
+          {footer && <span className="step-completed-label">{footer}</span>}
+          {filter !== 'tools' && <UsageDiagnostics turn={turn} />}
+        </div>
+      )}
+    </li>
   );
 }
 
 const decisionLabels: Record<string, string> = {
   allow_once: 'Разрешено один раз',
-  allow_session: 'Разрешено для этого действия в контексте агента',
+  allow_session: 'Разрешено в этом чате',
   deny: 'Отклонено',
-  expired: 'Запрос закрыт без ответа',
+  expired: 'Закрыт без ответа',
 };
 
 function ApprovalCard({
@@ -793,18 +678,7 @@ function ApprovalCard({
         {!pending && <span className="muted">{decisionLabels[approval.decision ?? '']}</span>}
       </div>
       <pre className="approval-detail">{approval.detail}</pre>
-      {approval.cwd && (
-        <p className="approval-meta">
-          Папка: <code>{approval.cwd}</code>
-        </p>
-      )}
-      {approval.reason && <p className="approval-meta">Причина: {approval.reason}</p>}
-      {pending && (
-        <p className="approval-meta">
-          Подтверждение относится к этому запросу агента. Разрешение на контекст не включает
-          остальные команды и других участников команды. Авторежим работает в границах песочницы.
-        </p>
-      )}
+      {approval.reason && <p className="approval-meta">{approval.reason}</p>}
       {pending && actionable && (
         <div className="approval-actions">
           {offered('deny') && (
@@ -818,7 +692,7 @@ function ApprovalCard({
               disabled={busy}
               onClick={() => answer('allow_session')}
             >
-              Разрешить в этом контексте
+              Разрешить в чате
             </button>
           )}
           {offered('allow_once') && (
@@ -829,9 +703,7 @@ function ApprovalCard({
         </div>
       )}
       {pending && approval.available_decisions?.length === 0 && (
-        <p className="notice">
-          CLI предлагает неподдерживаемое решение. Остановите задачу и обновите Codex CLI.
-        </p>
+        <p className="notice">Неподдерживаемый запрос. Остановите задачу и обновите CLI.</p>
       )}
       {pending && !actionable && <p className="muted small">Запрос больше не активен.</p>}
       {error && <p className="notice error">{error}</p>}

@@ -45,20 +45,37 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   await root.getByLabel('Провайдер', { exact: true }).selectOption('anthropic');
   await expect(
     root.getByLabel('Доступ', { exact: true }).locator('option[value="full_access"]'),
-  ).toHaveAttribute('disabled', '');
+  ).not.toHaveAttribute('disabled', '');
   await expect(root.getByLabel('Модель', { exact: true })).toHaveValue('sonnet');
   await root.getByLabel('Модель', { exact: true }).selectOption('opus');
+  await expect(root.getByRole('button', { name: 'Скоростной режим', exact: true })).toBeDisabled();
+  await root.getByLabel('Модель', { exact: true }).selectOption('claude-opus-5-5');
+  const fast = root.getByRole('button', { name: 'Скоростной режим', exact: true });
+  await fast.click();
+  const fastWarning = page.getByRole('dialog', { name: 'Включить скоростной режим' });
+  await expect(fastWarning).toContainText('дополнительными usage credits');
+  await expect(fastWarning).toContainText('при остатке лимита подписки');
+  await fastWarning.getByRole('button', { name: 'Включить Fast', exact: true }).click();
+  await expect(fast).toHaveAttribute('aria-pressed', 'true');
+  await root.getByLabel('Модель', { exact: true }).selectOption('opus');
+  await expect(fast).toBeDisabled();
+  await expect(fast).toHaveAttribute('aria-pressed', 'false');
   await root.getByLabel('Уровень обдумывания', { exact: true }).fill('3');
   await worker.locator('.agent-card-toggle').click();
   await worker.getByLabel('Провайдер', { exact: true }).selectOption('openai');
   await expect(worker.getByLabel('Модель', { exact: true })).toHaveValue('preview-model');
-  // Default team members keep the provider's standard access; full access is never preselected.
-  await expect(worker.getByLabel('Доступ', { exact: true })).toHaveValue('standard');
+  // Participants start read-only; the owner can explicitly change their access.
+  await expect(worker.getByLabel('Доступ', { exact: true })).toHaveValue('read_only');
+  await expect(worker.getByLabel('Доступ', { exact: true })).toBeEnabled();
   await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByLabel('Доступ в чате').click();
-  await expect(
-    page.getByRole('button', { name: /Полный доступ.*Недоступно для Claude/ }),
-  ).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Полный доступ.*Без песочницы/ })).toBeEnabled();
+  await page.getByRole('button', { name: /Полный доступ.*Без песочницы/ }).click();
+  await expect(page.getByRole('alertdialog', { name: 'Полный доступ', exact: true })).toBeVisible();
+  await page
+    .getByRole('alertdialog', { name: 'Полный доступ', exact: true })
+    .getByRole('button', { name: 'Отмена', exact: true })
+    .click();
   await page.keyboard.press('Escape');
   await expect(page.locator('.composer-agent')).toHaveCount(2);
   await expect(page.locator('.composer-team')).toContainText('preview-model');
@@ -78,8 +95,13 @@ test('Claude account and mixed team expose models, effort and honest tool limita
   const chats = await page.locator('.recent-chat').count();
   await page.getByRole('button', { name: 'Перейти', exact: true }).click();
   const handoff = page.getByRole('dialog', { name: 'Перейти с контекстом' });
+  await expect(handoff).toContainText('История передаётся выбранному агенту');
   await handoff.getByLabel('Провайдер', { exact: true }).selectOption('openai');
   await handoff.getByRole('button', { name: 'Перейти с контекстом', exact: true }).click();
-  await expect(page.locator('.composer-agent').first()).toContainText('preview-model');
+  await expect(page.locator('.composer-agent')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Модель в чате', exact: true })).toContainText(
+    'Модель предпросмотра',
+  );
+  await expect(page.locator('.team-panel')).toHaveCount(0);
   await expect(page.locator('.recent-chat')).toHaveCount(chats);
 });

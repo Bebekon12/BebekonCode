@@ -1,3 +1,4 @@
+import { AnswerImage, AnswerLink } from './AnswerMedia';
 import { isValidElement, memo, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -43,9 +44,12 @@ function language(children: ReactNode): string {
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming,
+  copy = true,
 }: {
   text: string;
   streaming: boolean;
+  /** Only the last answer segment of a turn offers "Копировать". */
+  copy?: boolean;
 }) {
   return (
     <div className="chat-markdown">
@@ -62,7 +66,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
             return (
               <div className="code-review-block">
                 <div className="code-block-toolbar">
-                  <span>Код</span>
+                  <span>{language(children).replace('language-', '') || 'Код'}</span>
                   <CopyButton text={plain(children)} label="Копировать код" />
                 </div>
                 <pre>{children}</pre>
@@ -74,12 +78,8 @@ export const ChatMarkdown = memo(function ChatMarkdown({
               <table>{children}</table>
             </div>
           ),
-          img: ({ alt }) => <span className="muted">[Изображение: {alt || 'без подписи'}]</span>,
-          a: ({ href, children }) => (
-            <span className="message-link" title={href}>
-              {children} {href && <CopyButton text={href} label="Копировать ссылку" />}
-            </span>
-          ),
+          img: ({ src, alt }) => <AnswerImage src={src} alt={alt} />,
+          a: ({ href, children }) => <AnswerLink href={href}>{children}</AnswerLink>,
         }}
       >
         {text}
@@ -87,7 +87,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
       {streaming ? (
         <span className="stream-caret" />
       ) : (
-        <CopyButton text={text} label="Копировать ответ" />
+        copy && <CopyButton text={text} label="Копировать ответ" />
       )}
     </div>
   );

@@ -39,37 +39,37 @@ const categories = [
     id: 'Провайдеры',
     label: 'Аккаунты',
     icon: Cpu,
-    description: 'Подключайте CLI и управляйте отдельными аккаунтами.',
+    description: 'CLI и аккаунты',
   },
   {
     id: 'Лимиты',
     label: 'Использование',
     icon: Activity,
-    description: 'Доступный остаток подписок и переход к лимитам провайдера.',
+    description: 'Остаток подписок',
   },
   {
     id: 'Разрешения',
     label: 'Разрешения',
     icon: ShieldCheck,
-    description: 'Как работают песочница, подтверждения и доступ к проекту.',
+    description: 'Режимы доступа',
   },
   {
     id: 'Возможности',
     label: 'Возможности',
     icon: Puzzle,
-    description: 'Командная работа, инструменты и доступные расширения.',
+    description: 'Команды и расширения',
   },
   {
     id: 'MCP',
     label: 'MCP-серверы',
     icon: Puzzle,
-    description: 'Локальные серверы, отдельные аккаунты и подтверждения вызовов.',
+    description: 'Локальные серверы',
   },
   {
     id: 'О программе и обновления',
     label: 'О программе',
     icon: Info,
-    description: 'Версия приложения и проверенные обновления для Windows.',
+    description: 'Версия и обновления',
   },
 ];
 export function Settings({
@@ -447,9 +447,6 @@ export function Settings({
                       {provider.detected_path && (
                         <code className="path">{provider.detected_path}</code>
                       )}
-                      <p>
-                        Вход выполняется через официальные средства провайдера. Аккаунты независимы.
-                      </p>
                     </details>
                     {provider.id === 'openai' && !provider.available && (
                       <div className="setup-hint">
@@ -461,10 +458,7 @@ export function Settings({
                     {provider.id === 'anthropic' && !provider.available && (
                       <div className="setup-hint">
                         <strong>Установка Claude Code для Windows</strong>
-                        <p>
-                          Установите официальный нативный CLI по документации Anthropic. Для уже
-                          установленного CLI выполните:
-                        </p>
+                        <p>Установите CLI по документации Anthropic или обновите:</p>
                         <code>claude update</code>
                       </div>
                     )}
@@ -479,10 +473,6 @@ export function Settings({
                     )}
                   </div>
                 ))}
-              <p className="small muted">
-                Аккаунты независимы: сессия всегда работает на выбранном при создании аккаунте, а
-                при исчерпании лимита приложение не переключается на другой автоматически.
-              </p>
             </>
           )}
           {tab === 'Разрешения' && (
@@ -492,45 +482,34 @@ export function Settings({
                 <div className="setting-row">
                   <div>
                     <strong>По правилам провайдера</strong>
-                    <p>
-                      Песочница Codex и подтверждения дополнительного доступа. Claude спрашивает
-                      перед правками.
-                    </p>
+                    <p>Спрашивает перед правками и командами.</p>
                   </div>
                   <ShieldCheck size={18} />
                 </div>
                 <div className="setting-row">
                   <div>
                     <strong>Только чтение</strong>
-                    <p>Без изменения файлов. Используется для проверки работы участников.</p>
+                    <p>Без изменений файлов.</p>
                   </div>
                 </div>
                 <div className="setting-row">
                   <div>
                     <strong>Авто в проекте</strong>
-                    <p>
-                      Правки проекта разрешены. Shell и MCP Claude в Windows требуют подтверждения
-                      каждого вызова; песочницы ОС у Claude нет.
-                    </p>
+                    <p>Правки и команды в проекте без вопросов.</p>
                   </div>
                 </div>
                 <div className="setting-row">
                   <div>
-                    <strong>Полный доступ · Codex</strong>
-                    <p>
-                      Без песочницы и подтверждений команд. Включается в отдельном чате после
-                      предупреждения. Проверки и автоматические рабочие сессии остаются в
-                      ограниченном режиме.
-                    </p>
+                    <strong>Полный доступ</strong>
+                    <p>Без песочницы и подтверждений. Включается в отдельном чате.</p>
                   </div>
                 </div>
               </div>
               <details className="settings-policy-details">
                 <summary>Защита данных и управление компьютером</summary>
                 <p className="small muted">
-                  Учётные данные запрещены в любом режиме. Экран, мышь и клавиатура требуют
-                  отдельного подтверждения каждого действия и видимого индикатора. Computer Use пока
-                  недоступен.
+                  Учётные данные закрыты в любом режиме. Экран, мышь и клавиатура — только с
+                  подтверждением.
                 </p>
               </details>
             </>
@@ -540,29 +519,15 @@ export function Settings({
             <>
               <div className="provider-card">
                 <strong>Команда агентов</strong>
-                <p>До трёх участников, взаимная проверка и общий ответ координатора.</p>
-                <details>
-                  <summary>Авторазбиение и проверка</summary>
-                  <p>
-                    До четырёх подзадач на чтение. Модели, аккаунты и доступ выбираете вы;
-                    результаты проверяются в режиме «Только чтение».
-                  </p>
-                </details>
+                <p>Ведущий выполняет задачу, до двух специалистов помогают.</p>
               </div>
               <div className="provider-card">
                 <strong>Навыки Codex и вложения</strong>
-                <p>
-                  Плагины Codex устанавливаются в разделе «Плагины» через официальный CLI. Навыки
-                  доступны через skill-installer. Прикреплённые изображения открываются по нажатию
-                  до отправки и в истории чата.
-                </p>
+                <p>Плагины — в разделе «Плагины», навыки — через skill-installer.</p>
               </div>
               <div className="provider-card">
                 <strong>Генерация изображений</strong>
-                <p>
-                  Провайдер генерации изображений не настроен. Потребуется отдельное подключение
-                  официального API.
-                </p>
+                <p>Не подключена.</p>
               </div>
             </>
           )}
@@ -576,10 +541,7 @@ export function Settings({
                 </div>
               </div>
               <p className="muted">{product.description}</p>
-              <div className="notice">
-                Codex и Claude работают через официальные CLI. История и настройки хранятся на этом
-                компьютере.
-              </div>
+              <div className="notice">История и настройки хранятся на этом компьютере.</div>
               <UpdatePanel
                 client={client}
                 setInstalling={setInstalling}

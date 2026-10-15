@@ -3,39 +3,48 @@ import { Check, ChevronDown, Eye, ShieldAlert, ShieldCheck, ShieldQuestion } fro
 
 export const accessOptions = [
   {
+    id: 'plan',
+    label: 'Plan · Claude',
+    description: 'Только план, без правок',
+    Icon: Eye,
+  },
+  {
+    id: 'claude_auto',
+    label: 'Auto · Claude',
+    description: 'Claude сам оценивает риск команд',
+    Icon: ShieldCheck,
+  },
+  {
     id: 'read_only',
     label: 'Только чтение',
-    description: 'Изучать проект и отвечать. Изменять файлы нельзя.',
+    description: 'Без изменений файлов',
     Icon: Eye,
   },
   {
     id: 'standard',
     label: 'По правилам провайдера',
-    description:
-      'Claude спрашивает перед правками. Для Codex действует авторежим песочницы; отдельное подтверждение каждой правки пока недоступно.',
+    description: 'Спрашивает перед правками и командами',
     Icon: ShieldQuestion,
   },
   {
     id: 'workspace_auto',
     label: 'Авто в проекте',
-    description:
-      'Правки в проекте автоматически. Codex также выполняет команды в песочнице. Дополнительный доступ требует подтверждения.',
+    description: 'Правки и команды в проекте без вопросов',
     Icon: ShieldCheck,
   },
   {
     id: 'full_access',
     label: 'Полный доступ',
-    description:
-      'Без песочницы и без подтверждений: сеть, любые файлы и команды на этом компьютере. Только для Codex, включается для этого чата.',
+    description: 'Без песочницы и подтверждений',
     Icon: ShieldAlert,
   },
 ] as const;
 
 /** Providers whose official CLI documents a full-access mode used by the core. */
-export const fullAccessProviders = ['openai', 'mock'];
+export const fullAccessProviders = ['openai', 'anthropic', 'mock'];
 
 export const fullAccessWarning =
-  'Агент сможет без вопросов читать и изменять любые файлы, запускать любые команды и выходить в сеть от вашего имени. Ошибка агента может повредить данные вне проекта. Включайте только для задач, которым доверяете, и возвращайте обычный режим после работы.';
+  'Агент будет менять файлы, запускать команды и выходить в сеть без вопросов. Ошибка может задеть данные вне проекта. Учётные данные остаются закрыты.';
 
 export function AccessPicker({
   value,
@@ -138,36 +147,34 @@ export function AccessPicker({
             </div>
           ) : (
             <>
-              <div className="access-popover-title">Что разрешено агенту?</div>
-              {accessOptions.map(({ id, label, description, Icon }) => {
-                const full = id === 'full_access';
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={full ? 'access-danger' : undefined}
-                    aria-pressed={id === value}
-                    disabled={disabled || (full && !fullAvailable)}
-                    onClick={() => (full && id !== value ? setConfirming(true) : choose(id))}
-                  >
-                    <Icon size={20} />
-                    <span>
-                      <strong>{label}</strong>
-                      <small>
-                        {full && !fullAvailable
-                          ? 'Недоступно для Claude: приложение сохраняет защитный слой Claude Code.'
-                          : description}
-                      </small>
-                    </span>
-                    {id === value && <Check size={17} />}
-                  </button>
-                );
-              })}
-              <p>
-                {value === 'full_access'
-                  ? 'Сейчас песочница и подтверждения отключены для этого чата.'
-                  : 'Доступ за пределы песочницы требует отдельного подтверждения. В режиме чтения он запрещён.'}
-              </p>
+              <div className="access-popover-title">Доступ агента</div>
+              {accessOptions
+                .filter(
+                  (option) =>
+                    provider === 'anthropic' || !['plan', 'claude_auto'].includes(option.id),
+                )
+                .map(({ id, label, description, Icon }) => {
+                  const full = id === 'full_access';
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={full ? 'access-danger' : undefined}
+                      aria-pressed={id === value}
+                      disabled={disabled || (full && !fullAvailable)}
+                      onClick={() => (full && id !== value ? setConfirming(true) : choose(id))}
+                    >
+                      <Icon size={20} />
+                      <span>
+                        <strong>{label}</strong>
+                        <small>
+                          {full && !fullAvailable ? 'Недоступно для этого провайдера' : description}
+                        </small>
+                      </span>
+                      {id === value && <Check size={17} />}
+                    </button>
+                  );
+                })}
             </>
           )}
         </div>

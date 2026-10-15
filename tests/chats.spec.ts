@@ -11,7 +11,7 @@ test('full access requires confirmation and can be returned to a restricted mode
   await access.click();
   await page.getByRole('button', { name: /Полный доступ.*Без песочницы/ }).click();
   const confirmation = page.getByRole('alertdialog', { name: 'Полный доступ', exact: true });
-  await expect(confirmation).toContainText('может повредить данные вне проекта');
+  await expect(confirmation).toContainText('может задеть данные вне проекта');
   await expect(access).toContainText('По правилам провайдера');
   await confirmation.getByRole('button', { name: 'Отмена', exact: true }).click();
   await page.keyboard.press('Escape');
@@ -22,7 +22,7 @@ test('full access requires confirmation and can be returned to a restricted mode
   await expect(access).toContainText('Полный доступ');
   await expect(access).toHaveClass(/access-danger/);
   await access.click();
-  await page.getByRole('button', { name: /Только чтение.*Изучать/ }).click();
+  await page.getByRole('button', { name: /Только чтение.*Без изменений/ }).click();
   await expect(access).toContainText('Только чтение');
   await expect(access).not.toHaveClass(/access-danger/);
 });
@@ -42,7 +42,7 @@ test('create an ordinary chat without a project and change its access and tools'
   await expect(page.locator('.chat-title')).toContainText('Без проекта');
   await expect(page.getByRole('tab')).toHaveCount(0);
   await page.getByLabel('Доступ в чате').click();
-  await page.getByRole('button', { name: /Только чтение.*Изучать/ }).click();
+  await page.getByRole('button', { name: /Только чтение.*Без изменений/ }).click();
   await expect(page.getByLabel('Доступ в чате')).toContainText('Только чтение');
   await page
     .locator('.chat-controls')
@@ -72,7 +72,7 @@ test('team creation exposes independent participant settings and auto mode', asy
   await expect(wizard.locator('.chat-agent-card')).toHaveCount(3);
   await expect(wizard.getByLabel('Доступ', { exact: true }).nth(1)).toBeEnabled();
   await wizard.locator('.agent-card-toggle').nth(1).click();
-  await wizard.getByLabel('Доступ', { exact: true }).nth(1).selectOption('workspace_auto');
+  await expect(wizard.getByLabel('Доступ', { exact: true }).nth(1)).toHaveValue('read_only');
   await wizard.getByLabel('Роль', { exact: true }).nth(1).fill('Архитектор');
   await page.screenshot({ path: 'test-results/team-creation.png' });
   await wizard.getByRole('button', { name: 'Создать чат', exact: true }).click();
@@ -84,12 +84,15 @@ test('team creation exposes independent participant settings and auto mode', asy
   ).toHaveValue('Архитектор');
   await expect(
     page.getByRole('dialog', { name: 'Настройки агента' }).getByLabel('Доступ', { exact: true }),
-  ).toHaveValue('workspace_auto');
+  ).toHaveValue('read_only');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+n');
-  await page.getByRole('button', { name: /Авторазбиение ИИ/ }).click();
+  await page
+    .getByRole('dialog', { name: 'Новый чат' })
+    .getByRole('button', { name: /Автокоманда/ })
+    .click();
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
-  await expect(page.locator('.chat-title')).toContainText('Авторазбиение');
+  await expect(page.locator('.chat-title')).toContainText('Автокоманда');
 });
 
 test('reasoning and handoff remain in the same chat', async ({ page }) => {

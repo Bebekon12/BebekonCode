@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct TurnRequest {
+    pub live_input: Option<crate::conversation::LiveReceiver>,
     pub attachments: Vec<crate::attachments::AttachedFile>,
     pub prompt: String,
     pub session: Session,
@@ -28,6 +29,13 @@ pub trait AgentProvider: Send + Sync {
 
     /// Re-detects the provider binary and version. Called on startup and on explicit refresh.
     async fn refresh(&self) {}
+    async fn fork_session(
+        &self,
+        _account: &AccountProfile,
+        _session: &Session,
+    ) -> Result<Option<String>> {
+        Ok(None)
+    }
 
     async fn run(
         &self,
@@ -53,6 +61,7 @@ pub trait AgentProvider: Send + Sync {
                 is_default: false,
                 reasoning_efforts: vec![],
                 default_reasoning_effort: None,
+                fast_mode_available: false,
             })
             .collect())
     }
