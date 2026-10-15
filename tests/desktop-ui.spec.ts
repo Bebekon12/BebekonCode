@@ -42,14 +42,23 @@ test('project, session, streaming, stop and keyboard commands', async ({ page })
     page.getByLabel('Провайдер', { exact: true }).locator('option[value="anthropic"]'),
   ).not.toHaveAttribute('disabled', '');
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
+  // Keep the response in flight until we actually click Stop. Real CI scheduling
+  // must not let the short preview finish between the assertion and the click.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page
     .getByRole('textbox', { name: 'Сообщение агенту' })
     .fill('Design a safe provider boundary');
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).press('Control+Enter');
+  await page.clock.runFor(1500);
   await expect(page.getByRole('button', { name: 'Остановить агента' })).toBeVisible();
   await expect(page.getByText('Это ответ локального демо.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Остановить агента' }).click();
+  await page.clock.runFor(100);
   await expect(page.getByText('Остановлено вами')).toBeVisible();
+  await page.clock.runFor(10_000);
+  await expect(page.getByText('Ответ завершён', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Остановить агента' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Поиск и фильтры истории' }).click();
   await page.getByRole('textbox', { name: 'Поиск по событиям' }).fill('не существующий текст');
   await expect(page.getByText('Подходящих событий нет.')).toBeVisible();
@@ -80,16 +89,21 @@ test('project, session, streaming, stop and keyboard commands', async ({ page })
 
 test('multiple sessions retain separate timelines', async ({ page }) => {
   await page.goto('/?preview=1');
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.getByRole('button', { name: 'Добавить проект', exact: true }).click();
   await page.keyboard.press('Control+n');
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).fill('First independent task');
   await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+  await page.clock.runFor(100);
   await page.keyboard.press('Control+n');
   await page.getByRole('button', { name: 'Создать чат', exact: true }).click();
   await page.getByRole('textbox', { name: 'Сообщение агенту' }).fill('Second independent task');
   await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+  await page.clock.runFor(100);
   await page.getByRole('button', { name: 'Остановить агента' }).click();
+  await page.clock.runFor(5000);
   await expect(page.getByText('Остановлено вами')).toBeVisible();
   await page.getByRole('button', { name: /First independent task/ }).click();
   await expect(page.getByText('Ответ завершён')).toBeVisible({ timeout: 10_000 });
