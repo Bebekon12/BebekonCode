@@ -3,6 +3,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
 
+mod migrations;
+
 #[derive(Clone)]
 pub struct Storage {
     pub(crate) pool: SqlitePool,
@@ -20,7 +22,7 @@ impl Storage {
             .max_connections(4)
             .connect_with(options)
             .await?;
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        migrations::run(&pool).await?;
         // Processes do not survive a core restart; never silently replay a turn.
         sqlx::query("UPDATE sessions SET status = 'interrupted' WHERE status = 'running'")
             .execute(&pool)

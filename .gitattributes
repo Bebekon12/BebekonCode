@@ -4,3 +4,4 @@
 *.tsx text eol=lf
 *.yml text eol=lf
 *.md text eol=lf
+*.sql text eol=lf
