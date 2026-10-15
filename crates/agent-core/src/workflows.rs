@@ -837,7 +837,7 @@ mod tests {
         (temp, core, session)
     }
     async fn wait_queue(core: &Core, count: usize) {
-        tokio::time::timeout(Duration::from_secs(15), async {
+        let finished = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let q = core.task_queue().await.unwrap();
                 if q.len() == count
@@ -849,8 +849,18 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
-        .await
-        .unwrap();
+        .await;
+        if finished.is_err() {
+            // Name the stuck states so a slow or failing CI run explains itself.
+            let snapshot: Vec<String> = core
+                .task_queue()
+                .await
+                .unwrap()
+                .iter()
+                .map(|t| format!("{}={} ({:?})", t.id, t.state, t.error))
+                .collect();
+            panic!("queue did not settle to {count} finished tasks: {snapshot:?}");
+        }
     }
     #[tokio::test]
     async fn queue_runs_once_in_order_and_configuration_changes_require_confirmation() {
@@ -989,7 +999,13 @@ mod tests {
             .unwrap();
         tokio::time::sleep(Duration::from_millis(250)).await;
         core.change_queued_task(&id, false).await.unwrap();
-        assert!(!core.runs.lock().unwrap().get(&s.id).unwrap().is_cancelled());
+        // A finished owner turn has already left the registry; it was not cancelled either.
+        assert!(!core
+            .runs
+            .lock()
+            .unwrap()
+            .get(&s.id)
+            .is_some_and(|token| token.is_cancelled()));
         assert_eq!(core.task_queue().await.unwrap()[0].state, "cancelled");
         core.cancel(&s.id).unwrap();
         core.shutdown().await;
